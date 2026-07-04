@@ -52,6 +52,39 @@ function available(targetId) {
   try { return fs.existsSync(TARGETS[targetId].detectDir); } catch { return false; }
 }
 
+// ---- OpenCode: o adapter é um PLUGIN (arquivo JS em ~/.config/opencode/
+// plugin/), não hooks em settings — mecânica própria de instalação. ----
+const OPENCODE = {
+  label: 'OpenCode',
+  detectDir: path.join(os.homedir(), '.config', 'opencode'),
+  pluginDir: path.join(os.homedir(), '.config', 'opencode', 'plugin'),
+  pluginFile: 'ai-traffic-lights.js',
+};
+function opencodePluginPath() { return path.join(OPENCODE.pluginDir, OPENCODE.pluginFile); }
+function opencodeAvailable() {
+  try { return fs.existsSync(OPENCODE.detectDir); } catch { return false; }
+}
+function opencodeInstalled() {
+  try { return fs.existsSync(opencodePluginPath()); } catch { return false; }
+}
+function installOpencode(srcPlugin) {
+  const dest = opencodePluginPath();
+  const updated = fs.existsSync(dest);
+  fs.mkdirSync(OPENCODE.pluginDir, { recursive: true });
+  fs.copyFileSync(srcPlugin, dest);
+  return { dest, updated, wrote: true };
+}
+function removeOpencode() {
+  try {
+    if (fs.existsSync(opencodePluginPath())) { fs.unlinkSync(opencodePluginPath()); return { removed: 1, wrote: true }; }
+  } catch {}
+  return { removed: 0, wrote: false };
+}
+// Auto-atualização no boot do app: só re-copia se o usuário JÁ instalou.
+function syncOpencodeIfInstalled(srcPlugin) {
+  try { if (opencodeInstalled()) fs.copyFileSync(srcPlugin, opencodePluginPath()); } catch {}
+}
+
 // Copia o hook empacotado/do repo para <baseDir>/bin e retorna o destino.
 // Rodar de novo atualiza a cópia (idempotente). Funciona de dentro do asar
 // (o fs do Electron lê asar transparentemente).
@@ -142,4 +175,7 @@ function remove(targetId) {
   return { removed, wrote };
 }
 
-module.exports = { TARGETS, HOOK_MARKER, available, syncHookCopy, install, remove };
+module.exports = {
+  TARGETS, HOOK_MARKER, available, syncHookCopy, install, remove,
+  OPENCODE, opencodeAvailable, opencodeInstalled, installOpencode, removeOpencode, syncOpencodeIfInstalled,
+};

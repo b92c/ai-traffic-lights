@@ -32,6 +32,8 @@ function preflight() {
   }
 }
 
+const OPENCODE_PLUGIN_SRC = path.resolve(__dirname, '..', 'adapters', 'opencode', 'ai-traffic-lights.js');
+
 try {
   if (process.argv.includes('--remove')) {
     for (const id of Object.keys(installer.TARGETS)) {
@@ -41,6 +43,8 @@ try {
         ? `✓ ${t.label}: hook removido (${r.removed} entradas).`
         : `✓ ${t.label}: nada instalado.`);
     }
+    const ro = installer.removeOpencode();
+    console.log(ro.removed ? '✓ OpenCode: plugin removido.' : '✓ OpenCode: nada instalado.');
     console.log('  State files antigos são limpos pelo próprio overlay.');
   } else {
     preflight();
@@ -56,6 +60,14 @@ try {
       console.log(!r.wrote
         ? `✓ ${t.label}: já instalado e atualizado.`
         : `✓ ${t.label}: instalado (${r.added} eventos, ${r.updated} caminhos atualizados).`);
+    }
+    // OpenCode: adapter é um plugin (arquivo JS), não hooks em settings
+    if (installer.opencodeAvailable()) {
+      const ro = installer.installOpencode(OPENCODE_PLUGIN_SRC);
+      console.log(`✓ OpenCode: plugin ${ro.updated ? 'atualizado' : 'instalado'} em ${ro.dest}`);
+      console.log('  (sessões OpenCode já abertas precisam reiniciar para carregar o plugin)');
+    } else {
+      console.log(`- OpenCode: ${installer.OPENCODE.detectDir} não existe — pulado.`);
     }
     console.log(`  Cópia do hook: ${dest}`);
     console.log('  Sessões novas aparecem no semáforo imediatamente; as já abertas, no próximo evento.');

@@ -406,6 +406,10 @@ function installHookFromApp() {
       const r = hookInstaller.install(id, dest);
       parts.push(`${t.label}: ${r.wrote ? `instalado (${r.added}+${r.updated})` : 'ok'}`);
     }
+    if (hookInstaller.opencodeAvailable()) {
+      hookInstaller.installOpencode(path.join(__dirname, 'adapters/opencode/ai-traffic-lights.js'));
+      parts.push('OpenCode: plugin ok');
+    }
     notifyUser(parts.length ? parts.join(' · ') : 'Nenhum agente suportado encontrado.');
   } catch (e) { notifyUser(`Falha ao instalar hook: ${e.message}`); }
 }
@@ -417,6 +421,7 @@ function removeHookFromApp() {
       const r = hookInstaller.remove(id);
       if (r.removed) parts.push(`${t.label}: ${r.removed} removidas`);
     }
+    if (hookInstaller.removeOpencode().removed) parts.push('OpenCode: plugin removido');
     notifyUser(parts.length ? parts.join(' · ') : 'Nada instalado.');
   } catch (e) { notifyUser(`Falha ao remover hook: ${e.message}`); }
 }
@@ -494,6 +499,8 @@ app.whenReady().then(() => {
   try { fs.mkdirSync(STATE_DIR, { recursive: true }); } catch {}
   // mantém a cópia estável do hook em dia (o settings.json aponta pra ela)
   try { hookInstaller.syncHookCopy(path.join(__dirname, 'hooks/traffic-hook.sh'), BASE_DIR); } catch {}
+  // idem pro plugin do OpenCode (só se o usuário já o instalou)
+  hookInstaller.syncOpencodeIfInstalled(path.join(__dirname, 'adapters/opencode/ai-traffic-lights.js'));
   createWindow();
   createTray();
   // Atalho global de exibir/ocultar: Ctrl+Alt+H (primário) + legado

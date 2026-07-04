@@ -6,8 +6,8 @@ Overlay translúcido sempre no topo (Electron) que mostra o estado de cada
 sessão de **agente de IA em terminal** no seu desktop como um semáforo:
 🟢 pronto · 🟡 trabalhando · 🔴 precisa de você.
 
-Monitora **Claude Code** e **Gemini CLI** hoje. A arquitetura é agnóstica —
-Codex e OpenCode entram via adapters (ver
+Monitora **Claude Code**, **Gemini CLI** e **OpenCode** hoje. A arquitetura é
+agnóstica — agentes novos entram via adapters (ver
 [Adicionando um agente](#adicionando-um-novo-agente)).
 
 ![Overlay do AI Traffic Lights](assets/screenshots/overlay.png)
@@ -47,8 +47,9 @@ por sessão, clique para pular pro terminal — **janela _e_ aba**.
 git clone https://github.com/aronpc/ai-traffic-lights.git
 cd ai-traffic-lights
 npm install
-npm run setup-hook   # registra o adapter no Claude Code (~/.claude) e no
-                     # Gemini CLI (~/.gemini), conforme presentes
+npm run setup-hook   # registra os adapters: Claude Code (~/.claude),
+                     # Gemini CLI (~/.gemini) e OpenCode (plugin em
+                     # ~/.config/opencode/plugin/), conforme presentes
 npm start            # abre o overlay
 ```
 
@@ -193,8 +194,9 @@ cat "${XDG_DATA_HOME:-$HOME/.local/share}/ai-traffic-lights/state/t.json" | jq .
 ## Roadmap
 
 - [x] Adapter do Gemini CLI (hooks) + detecção de idle via sonda argv
-- [ ] Adapters: Codex · OpenCode (entradas do registro prontas em
-  `src/agents.js`; falta pesquisar os mecanismos de evento de cada um)
+- [x] Adapter do OpenCode (plugin: eventos chat/tool/idle/permission, captura
+  de modelo — ver `adapters/opencode/`)
+- [ ] Adapter do Codex (entrada do registro pronta em `src/agents.js`)
 - [ ] Foco de janela Wayland nativo completo (hoje: XWayland + URI de foco do
   Warp + relançar-para-alternar)
 - [ ] Empacotamento: AppImage + .deb (electron-builder)

@@ -1,0 +1,127 @@
+// ai-traffic-lights.js — adapter OpenCode do ai-traffic-lights (plugin).
+//
+// Instalado em ~/.config/opencode/plugin/ pelo `npm run setup-hook` (ou pelo
+// menu do tray). Roda DENTRO do processo do OpenCode e escreve o contrato de
+// state file lido pelo overlay:
+//   ${XDG_DATA_HOME:-~/.local/share}/ai-traffic-lights/state/<session>.json
+//
+// Tradução de eventos → vocabulário canônico do contrato:
+//   chat.message / message user     → UserPromptSubmit (captura janela ativa)
+//   tool.execute.before / after     → PreToolUse / PostToolUse
+//   session.idle                    → Stop
+//   permission.updated              → PermissionRequest (🔴🔑)
+//   session.error                   → PostToolUseFailure (🔴⚠)
+//   session.deleted                 → remove o state file
+//
+// Regra de ouro: NUNCA quebrar o OpenCode — todo hook engole exceções.
+
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
+const DATA_HOME = process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local/share")
+const STATE_DIR = path.join(DATA_HOME, "ai-traffic-lights", "state")
+
+export const AiTrafficLights = async ({ directory, $ }) => {
+  // Contexto do terminal capturado no boot (o processo herda o env do shell).
+  const boot = {
+    term_program: process.env.TERM_PROGRAM || null,
+    windowid: process.env.WINDOWID || null,
+    focus_url: process.env.WARP_FOCUS_URL || null,
+    zellij_session: process.env.ZELLIJ_SESSION_NAME || null,
+  }
+  let lastModel = null    // último modelID visto (mensagens do assistant)
+  let capturedWin = null  // janela ativa no último prompt (X11)
+
+  const read = (file) => {
+    try { return JSON.parse(fs.readFileSync(file, "utf8")) } catch { return {} }
+  }
+
+  // Escrita atômica (tmp + rename), merge-preserve de windowid/focus_url,
+  // events rolante (últimos 50) — mesmo comportamento do traffic-hook.sh.
+  const write = (sid, evt, tool) => {
+    if (!sid) return
+    try {
+      fs.mkdirSync(STATE_DIR, { recursive: true })
+      const file = path.join(STATE_DIR, `${sid}.json`)
+      const ex = read(file)
+      const now = Math.floor(Date.now() / 1000)
+      const st = {
+        schema_version: 2,
+        agent: "opencode",
+        session_id: sid,
+        pid: process.pid,
+        cwd: directory || process.cwd() || null,
+        transcript_path: ex.transcript_path || null,
+        model: lastModel || ex.model || null,
+        term_program: boot.term_program,
+        windowid: capturedWin || ex.windowid || boot.windowid || null,
+        focus_url: boot.focus_url || ex.focus_url || null,
+        zellij_session: boot.zellij_session,
+        last_event: evt,
+        last_event_ts: now,
+        last_tool: tool || null,
+        events: [
+          ...(Array.isArray(ex.events) ? ex.events : []),
+          { ts: now, event: evt, tool: tool || null },
+        ].slice(-50),
+      }
+      fs.writeFileSync(`${file}.tmp`, JSON.stringify(st))
+      fs.renameSync(`${file}.tmp`, file)
+    } catch {}
+  }
+
+  const drop = (sid) => {
+    if (!sid) return
+    try { fs.unlinkSync(path.join(STATE_DIR, `${sid}.json`)) } catch {}
+  }
+
+  // No prompt do usuário, a janela focada É o terminal da sessão (mesma
+  // técnica do adapter Claude/Gemini) — desambigua Warp multi-janela.
+  const captureWindow = async () => {
+    if (!process.env.DISPLAY) return
+    try {
+      const r = await $`xdotool getactivewindow`.quiet().nothrow()
+      const out = (r?.stdout?.toString() || "").trim()
+      if (/^\d+$/.test(out)) capturedWin = out
+    } catch {}
+  }
+
+  return {
+    "chat.message": async (_input, output) => {
+      try {
+        const m = (output && output.message) || {}
+        await captureWindow()
+        write(m.sessionID, "UserPromptSubmit", null)
+      } catch {}
+    },
+
+    "tool.execute.before": async (input) => {
+      try { write(input && input.sessionID, "PreToolUse", input && input.tool) } catch {}
+    },
+
+    "tool.execute.after": async (input) => {
+      try { write(input && input.sessionID, "PostToolUse", input && input.tool) } catch {}
+    },
+
+    event: async ({ event }) => {
+      try {
+        const t = event && event.type
+        const p = (event && event.properties) || {}
+        const info = p.info || {}
+        const sid = p.sessionID || info.sessionID || info.id || null
+
+        if (t === "message.updated") {
+          if (info.role === "assistant" && info.modelID) lastModel = info.modelID
+          // fallback p/ versões sem o hook chat.message
+          if (info.role === "user") { await captureWindow(); write(sid, "UserPromptSubmit", null) }
+          return
+        }
+        if (t === "session.idle") return write(sid, "Stop", null)
+        if (t === "permission.updated") return write(sid, "PermissionRequest", null)
+        if (t === "session.error") return write(sid, "PostToolUseFailure", null)
+        if (t === "session.deleted") return drop(sid)
+      } catch {}
+    },
+  }
+}

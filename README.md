@@ -6,8 +6,8 @@ A translucent always-on-top overlay (Electron) that shows the state of every
 **terminal AI agent session** on your desktop as a traffic light: 🟢 done ·
 🟡 working · 🔴 needs you.
 
-Monitors **Claude Code** and **Gemini CLI** today. The architecture is
-agent-agnostic — Codex and OpenCode land via adapters (see
+Monitors **Claude Code**, **Gemini CLI** and **OpenCode** today. The
+architecture is agent-agnostic — new agents land via adapters (see
 [Adding an agent](#adding-a-new-agent)).
 
 ![AI Traffic Lights overlay](assets/screenshots/overlay.png)
@@ -47,8 +47,9 @@ terminal — **window _and_ tab**.
 git clone https://github.com/aronpc/ai-traffic-lights.git
 cd ai-traffic-lights
 npm install
-npm run setup-hook   # registers the adapter for Claude Code (~/.claude) and
-                     # Gemini CLI (~/.gemini), whichever are present
+npm run setup-hook   # registers the adapters: Claude Code (~/.claude),
+                     # Gemini CLI (~/.gemini) and OpenCode (plugin in
+                     # ~/.config/opencode/plugin/), whichever are present
 npm start            # opens the overlay
 ```
 
@@ -194,8 +195,9 @@ cat "${XDG_DATA_HOME:-$HOME/.local/share}/ai-traffic-lights/state/t.json" | jq .
 ## Roadmap
 
 - [x] Gemini CLI adapter (hooks) + idle detection via argv probe
-- [ ] Adapters: Codex · OpenCode (registry entries ready in `src/agents.js`;
-  per-tool event mechanisms to research)
+- [x] OpenCode adapter (plugin: chat/tool/idle/permission events, model
+  capture — see `adapters/opencode/`)
+- [ ] Codex adapter (registry entry ready in `src/agents.js`)
 - [ ] Full native-Wayland window focus (today: XWayland + Warp focus URI +
   relaunch-to-toggle)
 - [ ] Packaging: AppImage + .deb (electron-builder)

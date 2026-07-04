@@ -20,7 +20,9 @@ const AGENTS = {
   // BeforeAgent/BeforeTool/AfterTool/AfterAgent pro vocabulário canônico).
   gemini:   { label: 'Gemini',   comm: [], argv: ['gemini'], adapter: 'hooks/traffic-hook.sh (AI_TL_AGENT=gemini)' },
   codex:    { label: 'Codex',    comm: ['codex'],    adapter: null }, // binário Rust
-  opencode: { label: 'OpenCode', comm: ['opencode'], adapter: null }, // binário ELF (verificado)
+  // Adapter: plugin JS que roda dentro do OpenCode (instalado em
+  // ~/.config/opencode/plugin/ pelo setup-hook).
+  opencode: { label: 'OpenCode', comm: ['opencode'], adapter: 'adapters/opencode/ai-traffic-lights.js' },
 };
 
 const DEFAULT_AGENT = 'claude';
