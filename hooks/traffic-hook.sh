@@ -68,7 +68,9 @@ main() {
   if [[ $input =~ \"transcript_path\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
     transcript="${BASH_REMATCH[1]}"
     if [ -f "$transcript" ]; then
-      model=$(tail -n 5000 "$transcript" 2>/dev/null | grep -oP '"model":"\K[^"]+' | tail -1)
+      # \s* tolera os dois formatos: JSONL compacto do Claude ("model":"x")
+      # e JSON pretty-printed do Gemini ("model": "x").
+      model=$(tail -n 5000 "$transcript" 2>/dev/null | grep -oP '"model"\s*:\s*"\K[^"]+' | tail -1)
     fi
   fi
 
