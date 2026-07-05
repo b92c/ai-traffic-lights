@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-05
+
+### Fixed
+- **Collapsed overlay now keeps the launcher footer.** Hiding the footer
+  along with the list left only the header (58px) on collapse. Expected
+  behaviour: collapse hides the list and resizes to header + footer
+  (~103px), keeping the Quick Launcher visible. `setExpanded()` now leaves
+  the launcher bar on and asks the main process for header+footer height
+  (new `h` arg on the `set-expanded` IPC, plumbed through preload).
+- **Window reliably shrinks on collapse.** `setSize()` below the current
+  `minimumSize` is silently rejected by GNOME/X11 — `getBounds()` returns
+  the old height with no error. `setMinimumSize()` is now called BEFORE
+  `setSize()` in both the `set-expanded` and `auto-height` handlers, so the
+  window can actually shrink (also fixes `auto-height` shrinking after a
+  grow).
+
 ## [0.3.1] - 2026-07-04
 
 ### Fixed
