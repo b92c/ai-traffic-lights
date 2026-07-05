@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-04
+
 ### Fixed
 - **Empty state no longer grows the window on its own.** The 0.3.0 autosize fix
   covered the session-rows path, but the onboarding/empty state still had the
@@ -204,7 +206,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bilingual docs (EN / pt-BR), `setup-hook` installer with a stable hook copy
   (AppImage-safe, move-safe), AppImage + `.deb` packaging.
 
-[Unreleased]: https://github.com/aronpc/ai-traffic-lights/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/aronpc/ai-traffic-lights/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/aronpc/ai-traffic-lights/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/aronpc/ai-traffic-lights/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/aronpc/ai-traffic-lights/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/aronpc/ai-traffic-lights/compare/v0.1.0...v0.1.1
