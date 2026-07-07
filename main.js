@@ -315,7 +315,12 @@ function loadSettings() {
   return settingsLib.mergeWithDefaults(raw);
 }
 function persistSettings(cfg) {
-  settingsCfg = settingsLib.mergeWithDefaults(cfg);
+  // Merge sobre o estado ATUAL, não sobre os defaults: as Preferências mandam
+  // um cfg PARCIAL (só os campos delas). Sem espalhar settingsCfg antes, cada
+  // save resetaria showUsage/collapsed/launchers pro default — apaga launcher
+  // custom e pisca o rodapé. Crucial pro live-apply (grava a cada mudança) e
+  // conserta o wipe latente que o "Salvar" batch já tinha.
+  settingsCfg = settingsLib.mergeWithDefaults({ ...settingsCfg, ...cfg });
   try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settingsCfg, null, 2)); } catch {}
   return settingsCfg;
 }
