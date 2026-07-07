@@ -17,6 +17,7 @@ const DEFAULT_ESCALATE_IDLE = true;         // toggle (plano §6, opção c)
 // (auth_success / elicitation_complete / elicitation_response são benignos).
 const REASON_FOR = {
   PermissionRequest: { level: 'awaiting', reason: 'permission' },
+  Question: { level: 'awaiting', reason: 'question' },
   PostToolUseFailure: { level: 'awaiting', reason: 'error' },
 };
 

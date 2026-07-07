@@ -8,7 +8,7 @@
 // Tradução de eventos → vocabulário canônico do contrato:
 //   chat.message / message user           → UserPromptSubmit (captura janela ativa)
 //   tool.execute.before / after           → PreToolUse / PostToolUse
-//   tool.execute.before (ask/question)    → PermissionRequest (🔴🔑) — pergunta ao usuário
+//   tool.execute.before (ask/question)    → Question (🔴❓) — pergunta ao usuário
 //   session.idle                          → Stop
 //   permission.ask (HOOK) / .asked        → PermissionRequest (🔴🔑) — pediu permissão
 //   permission.replied / .updated         → Stop (respondeu → sai do vermelho)
@@ -119,8 +119,8 @@ export const AiTrafficLights = async ({ directory, $ }) => {
     "tool.execute.before": async (input) => {
       try {
         const tool = input && input.tool
-        // tool de pergunta → 🔴🔑 (espera resposta); as demais → verde (rodando)
-        write(input && input.sessionID, isQuestionTool(tool) ? "PermissionRequest" : "PreToolUse", tool)
+        // tool de pergunta → 🔴❓ (espera resposta); as demais → verde (rodando)
+        write(input && input.sessionID, isQuestionTool(tool) ? "Question" : "PreToolUse", tool)
       } catch {}
     },
 

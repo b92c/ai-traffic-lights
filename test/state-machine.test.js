@@ -16,6 +16,7 @@ test('computeState: eventos de processamento → amarelo/tool', () => {
 
 test('computeState: razões explícitas de "precisa de você" → vermelho', () => {
   assert.deepEqual(computeState(state('PermissionRequest'), NOW), { level: 'awaiting', reason: 'permission' });
+  assert.deepEqual(computeState(state('Question'), NOW), { level: 'awaiting', reason: 'question' });
   assert.deepEqual(computeState(state('PostToolUseFailure'), NOW), { level: 'awaiting', reason: 'error' });
   assert.deepEqual(computeState(state('Notification'), NOW), { level: 'awaiting', reason: 'question' }, 'sem tipo → vermelho conservador');
 });
