@@ -73,6 +73,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cache; offline is silent (no badge).
 
 ### Fixed
+- **Click-to-focus on GNOME Terminal (Wayland) no longer fails silently.**
+  GNOME Terminal runs as a native Wayland window that `wmctrl` can't see, and
+  unlike Warp/Tilix it exports no focus hint (`WARP_FOCUS_URL`/`TILIX_ID`) — so
+  clicking its session was a silent no-op (the terminal never came forward). The
+  overlay now detects the no-op (Wayland + no window raised + no tab channel)
+  and shows a notification explaining the terminal isn't reachable, suggesting
+  Tilix or running under X11/XWayland. X11/XWayland behavior is unchanged.
+  (`focus.isFocusUnsupported`, pure + unit tested.)
 - **Usage footer no longer shows redundant/duplicate tiles.** When a collector
   briefly failed mid-tick (network blip), its fallback "summary" row
   (plan-only Claude, or GLM without parsed limits) could coexist with the real

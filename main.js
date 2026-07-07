@@ -226,16 +226,17 @@ function ancestorPidsOf(pid) {
 }
 
 function raiseWindow(windowid, pid) {
-  if (!pid) return;
+  if (!pid) return false;
   let list = '';
-  try { list = execFileSync('wmctrl', ['-l', '-p'], { encoding: 'utf8', timeout: 2000 }); } catch { return; }
+  try { list = execFileSync('wmctrl', ['-l', '-p'], { encoding: 'utf8', timeout: 2000 }); } catch { return false; }
   const wins = [];
   for (const line of list.split('\n')) {
     const m = line.match(/^(\S+)\s+\S+\s+(\d+)\s/);
     if (m) wins.push({ id: m[1], idNum: parseInt(m[1], 16), pid: parseInt(m[2], 10) });
   }
   const id = focus.pickWindow(windowid, wins, ancestorPidsOf(pid));
-  if (id) { try { execFileSync('wmctrl', ['-i', '-a', id], { timeout: 2000 }); } catch {} }
+  if (id) { try { execFileSync('wmctrl', ['-i', '-a', id], { timeout: 2000 }); return true; } catch { return false; } }
+  return false;
 }
 
 function focusTab(state) {
@@ -271,10 +272,16 @@ function enrichTarget(target) {
 function focusSession(target) {
   if (!target) return;
   const t = enrichTarget(target);
-  const raise = () => raiseWindow(t.windowid, t.pid);
-  const tab = () => focusTab(t);
-  if (IS_WAYLAND) { tab(); raise(); }
-  else { raise(); tab(); }
+  const hasTab = !!focus.tabChannel(t);
+  let raised = false;
+  if (IS_WAYLAND) { focusTab(t); raised = raiseWindow(t.windowid, t.pid); }
+  else { raised = raiseWindow(t.windowid, t.pid); focusTab(t); }
+  // Wayland + sem canal de aba + sem janela alcançável pelo wmctrl (ex.: GNOME
+  // Terminal nativo) → o clique vira no-op silencioso. Avisamos em vez de parecer
+  // quebrado (issue: foco do terminal padrão do Ubuntu no Wayland).
+  if (focus.isFocusUnsupported({ wayland: IS_WAYLAND, raised, hasTab })) {
+    notifyUser(T('ntf_focus_unsupported_wayland'));
+  }
 }
 
 // ---- aliases (apelido manual por cwd) ----

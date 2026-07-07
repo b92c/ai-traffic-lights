@@ -59,4 +59,15 @@ function tabChannel(state) {
   return null;
 }
 
-if (typeof module !== 'undefined') module.exports = { parseWindowId, pickWindow, tabChannel, parseEnviron };
+// Decide se o clique virou no-op (foco inviável): Wayland + não raiseou a
+// janela (wmctrl é cego pra apps Wayland-nativos) + sem canal de aba. O main
+// coleta hasTab (tabChannel != null) e raised (raiseWindow devolveu true) e
+// pede a decisão aqui — assim o gate fica testável e cobre QUALQUER terminal
+// Wayland-nativo sem canal (GNOME Terminal, Console/kgx, …), não uma lista
+// fixa. Em X11/XWayland o raise funciona, então nunca dispara. (issue: foco
+// do terminal padrão do Ubuntu no Wayland.)
+function isFocusUnsupported(state) {
+  return !!state && !!state.wayland && !state.raised && !state.hasTab;
+}
+
+if (typeof module !== 'undefined') module.exports = { parseWindowId, pickWindow, tabChannel, parseEnviron, isFocusUnsupported };

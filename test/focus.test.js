@@ -1,7 +1,7 @@
 // Testes da lógica pura de click-to-focus (issue #1).
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseWindowId, pickWindow, tabChannel, parseEnviron } = require('../src/focus.js');
+const { parseWindowId, pickWindow, tabChannel, parseEnviron, isFocusUnsupported } = require('../src/focus.js');
 
 test('parseWindowId: hex, decimal, inválidos', () => {
   assert.equal(parseWindowId('0x06a00007'), 0x06a00007);
@@ -78,4 +78,28 @@ test('#1 tabChannel: sem canal (gnome-terminal etc.) → null', () => {
   assert.equal(tabChannel(null), null);
   // focus_url não-warp é ignorado (allowlist de esquema)
   assert.equal(tabChannel({ focus_url: 'http://evil' }), null);
+});
+
+// isFocusUnsupported: o clique virou no-op? Wayland + sem raise (wmctrl cego
+// pra apps Wayland-nativos) + sem canal de aba. (issue: foco do terminal
+// padrão do Ubuntu no Wayland — gnome-terminal não é alcançável.)
+test('isFocusUnsupported: Wayland + sem raise + sem canal → true (gnome-terminal nativo)', () => {
+  assert.equal(isFocusUnsupported({ wayland: true, raised: false, hasTab: false }), true);
+});
+
+test('isFocusUnsupported: X11 nunca dispara (wmctrl alcança a janela)', () => {
+  assert.equal(isFocusUnsupported({ wayland: false, raised: false, hasTab: false }), false);
+});
+
+test('isFocusUnsupported: raiseou a janela → false (teve efeito)', () => {
+  assert.equal(isFocusUnsupported({ wayland: true, raised: true, hasTab: false }), false);
+});
+
+test('isFocusUnsupported: Warp/Tilix têm canal de aba → false mesmo sem raise', () => {
+  assert.equal(isFocusUnsupported({ wayland: true, raised: false, hasTab: true }), false);
+});
+
+test('isFocusUnsupported: null / state vazio → false', () => {
+  assert.equal(isFocusUnsupported(null), false);
+  assert.equal(isFocusUnsupported({}), false);
 });
