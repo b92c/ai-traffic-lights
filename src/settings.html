@@ -3,192 +3,142 @@
 <head>
   <meta charset="UTF-8">
   <title>Preferências — AI Traffic Lights</title>
-  <style>
-    :root {
-      --bg: #1a1d24; --panel: #22262f; --panel2: #2a2f39; --ink: #f4f6f9; --dim: #a8b2be;
-      --accent: #3fb96b; --danger: #e0563f; --border: rgba(255,255,255,0.12);
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      background: var(--bg); color: var(--ink); font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
-      padding: 18px 20px; font-size: 13.5px; -webkit-user-select: none;
-    }
-    /* O mínimo da janela (main.js) comporta todo o conteúdo; se algum tema/
-       fonte estourar por pixels, rola sem exibir barra (truque da lista do
-       overlay) — nunca aparece scrollbar nem corta botão. */
-    html, body { scrollbar-width: none; }
-    body::-webkit-scrollbar { display: none; }
-    h1 { font-size: 14px; font-weight: 700; margin-bottom: 14px; letter-spacing: 0.3px; }
-    .section { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
-    .section:last-of-type { border-bottom: none; }
-    .section-title { color: var(--dim); font-size: 10.5px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.6px; }
-    .field { margin-bottom: 10px; }
-    .field:last-child { margin-bottom: 0; }
-    .field label.top { display: block; color: var(--dim); font-size: 11.5px; margin-bottom: 6px; }
-    select, .shortcut {
-      width: 100%; background: var(--panel); color: var(--ink); border: 1px solid var(--border);
-      border-radius: 8px; padding: 9px 11px; font-size: 13px; outline: none;
-    }
-    select:focus, .shortcut.capturing { border-color: var(--accent); }
-    .shortcut { cursor: pointer; font-variant-numeric: tabular-nums; }
-    .shortcut.capturing { color: var(--dim); font-style: italic; }
-    .hint { color: var(--dim); font-size: 11px; margin-top: 5px; }
-    /* slider de transparência: trilho + valor tabular à direita */
-    .range-row { display: flex; align-items: center; gap: 12px; }
-    .range-val {
-      color: var(--ink); font-size: 12.5px; font-variant-numeric: tabular-nums;
-      min-width: 38px; text-align: right;
-    }
-    input[type=range] {
-      flex: 1; height: 4px; -webkit-appearance: none; appearance: none;
-      background: var(--panel2); border-radius: 3px; outline: none; cursor: pointer;
-    }
-    input[type=range]::-webkit-slider-thumb {
-      -webkit-appearance: none; appearance: none;
-      width: 16px; height: 16px; border-radius: 50%;
-      background: var(--accent); border: 2px solid var(--bg); cursor: pointer;
-      transition: transform 0.1s;
-    }
-    input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.15); }
-    input[type=range]:focus::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(63,185,107,0.3); }
-    .row { display: flex; align-items: center; gap: 10px; }
-    .row input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
-    .row label { cursor: pointer; }
-    button {
-      background: var(--panel); color: var(--ink); border: 1px solid var(--border);
-      border-radius: 8px; padding: 8px 14px; font-size: 12.5px; cursor: pointer; font-weight: 600;
-      text-align: center;          /* rótulo centrado p/ o grid de igual largura */
-    }
-    button:hover { background: var(--panel2); }
-    button.primary { background: var(--accent); border-color: var(--accent); color: #0d1f14; }
-    button.primary:hover { filter: brightness(1.08); }
-    button.danger:hover { background: rgba(224,86,63,0.18); border-color: var(--danger); color: var(--danger); }
-    /* Grid de 2 colunas iguais: ambos os botões da linha ganham MESMA largura e
-       altura (o mais alto dita a linha) — acaba com o look ragged de rótulos
-       longo + curto lado a lado (Instalar hooks / Remover hooks etc.). */
-    .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .btn-row button { width: 100%; }
-    /* Cancelar/Salvar uniformes e alinhados à direita, mesma largura. */
-    .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
-    .actions button { min-width: 112px; }
-    .appfoot {
-      display: flex; align-items: center; justify-content: space-between; gap: 10px;
-      margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border);
-      font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums;
-    }
-    .appfoot .ver { white-space: nowrap; }
-    .appfoot .repolink {
-      color: var(--dim); text-decoration: none; cursor: pointer; white-space: nowrap;
-      border-bottom: 1px dotted transparent; transition: color 0.12s, border-color 0.12s;
-    }
-    .appfoot .repolink:hover { color: var(--ink); border-bottom-color: var(--dim); }
-  </style>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="settings.css">
 </head>
 <body>
-  <h1 data-i18n="prefs_h1">🚦 Preferências</h1>
+  <div class="prefs">
+    <!-- header custom (arrastável), reusa .bar/.title/.logo/.btn do overlay -->
+    <header class="bar">
+      <span class="title"><img class="logo" src="../assets/tray-icon.png" alt=""><span data-i18n="prefs_h1">Preferências</span></span>
+      <span class="spacer"></span>
+      <button class="btn btn-close" id="closeBtn" data-tip="fechar" data-i18n-tip="tooltip_close" aria-label="fechar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </header>
 
-  <div class="section">
-    <div class="section-title" data-i18n="sec_behavior">Comportamento</div>
-    <div class="field">
-      <label class="top" for="idle" data-i18n="idle_label">Tempo parado até virar vermelho (idle)</label>
-      <select id="idle">
-        <option value="60" data-i18n="idle_1m">1 minuto</option>
-        <option value="120" data-i18n="idle_2m">2 minutos</option>
-        <option value="300" data-i18n="idle_5m">5 minutos (padrão)</option>
-        <option value="600" data-i18n="idle_10m">10 minutos</option>
-        <option value="900" data-i18n="idle_15m">15 minutos</option>
-        <option value="never" data-i18n="idle_never">Nunca (sempre verde quando pronto)</option>
-      </select>
-      <div class="hint" data-i18n="idle_hint">Uma sessão que terminou e ficou parada por mais que isso vira 🔴.</div>
-    </div>
-    <div class="field">
-      <label class="top" for="shortcut" data-i18n="shortcut_label">Atalho de mostrar/ocultar</label>
-      <div class="shortcut" id="shortcut" tabindex="0">—</div>
-      <div class="hint" data-i18n="shortcut_hint">Clique e pressione a combinação. Precisa de um modificador (Ctrl/Alt/Shift/Super).</div>
-    </div>
-    <div class="field">
-      <label class="top" for="lang" data-i18n="lang_label">Idioma</label>
-      <select id="lang">
-        <option value="auto" data-i18n="lang_auto">Automático (sistema)</option>
-        <option value="en" data-i18n="lang_en">English</option>
-        <option value="pt" data-i18n="lang_pt">Português</option>
-      </select>
-    </div>
-    <div class="row">
-      <input type="checkbox" id="markRead">
-      <label for="markRead" data-i18n="markread_label">Clique marca como lido</label>
-    </div>
-    <div class="hint" data-i18n="markread_hint">Clicar num terminal vermelho o silencia (fica cinza) até chegar uma nova notificação.</div>
-  </div>
+    <!-- abas horizontais -->
+    <nav class="tabs">
+      <button class="tab is-active" data-tab="general" data-i18n="tab_general">Geral</button>
+      <button class="tab" data-tab="integration" data-i18n="tab_integration">Integração</button>
+      <button class="tab" data-tab="about" data-i18n="tab_about">Sobre</button>
+    </nav>
 
-  <div class="section">
-    <div class="section-title" data-i18n="sec_appearance">Aparência</div>
-    <div class="field">
-      <label class="top" for="opacity" data-i18n="opacity_label">Transparência da janela</label>
-      <div class="range-row">
-        <input type="range" id="opacity" min="60" max="100" step="1">
-        <span class="range-val" id="opacityVal">97%</span>
-      </div>
-      <div class="hint" data-i18n="opacity_hint">Quão opaco é o painel. Mais baixo = mais transparente.</div>
-    </div>
-    <div class="row">
-      <input type="checkbox" id="compact">
-      <label for="compact" data-i18n="compact_label">Lista compacta</label>
-    </div>
-    <div class="hint" data-i18n="compact_hint">Linhas mais densas: esconde o modelo/ferramenta, só nome + luz.</div>
-  </div>
+    <div class="tab-body">
+      <!-- ===================== ABA: GERAL ===================== -->
+      <section class="tab-panel" data-panel="general">
+        <div class="section">
+          <div class="section-title" data-i18n="sec_behavior">Comportamento</div>
+          <div class="field">
+            <label class="top" for="idle" data-i18n="idle_label">Tempo parado até virar vermelho (idle)</label>
+            <select id="idle">
+              <option value="60" data-i18n="idle_1m">1 minuto</option>
+              <option value="120" data-i18n="idle_2m">2 minutos</option>
+              <option value="300" data-i18n="idle_5m">5 minutos (padrão)</option>
+              <option value="600" data-i18n="idle_10m">10 minutos</option>
+              <option value="900" data-i18n="idle_15m">15 minutos</option>
+              <option value="never" data-i18n="idle_never">Nunca (sempre verde quando pronto)</option>
+            </select>
+            <div class="hint" data-i18n="idle_hint">Uma sessão que terminou e ficou parada por mais que isso vira 🔴.</div>
+          </div>
+          <div class="field">
+            <label class="top" for="shortcut" data-i18n="shortcut_label">Atalho de mostrar/ocultar</label>
+            <div class="shortcut" id="shortcut" tabindex="0">—</div>
+            <div class="hint" data-i18n="shortcut_hint">Clique e pressione a combinação. Precisa de um modificador (Ctrl/Alt/Shift/Super).</div>
+          </div>
+          <div class="field">
+            <label class="top" for="lang" data-i18n="lang_label">Idioma</label>
+            <select id="lang">
+              <option value="auto" data-i18n="lang_auto">Automático (sistema)</option>
+              <option value="en" data-i18n="lang_en">English</option>
+              <option value="pt" data-i18n="lang_pt">Português</option>
+            </select>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="markRead">
+            <label for="markRead" data-i18n="markread_label">Clique marca como lido</label>
+          </div>
+          <div class="hint" data-i18n="markread_hint">Clicar num terminal vermelho o silencia (fica cinza) até chegar uma nova notificação.</div>
+        </div>
 
-  <div class="section">
-    <div class="section-title" data-i18n="sec_startup">Inicialização</div>
-    <div class="row">
-      <input type="checkbox" id="autostart">
-      <label for="autostart" data-i18n="autostart_label">Iniciar com o sistema</label>
-    </div>
-  </div>
+        <div class="section">
+          <div class="section-title" data-i18n="sec_appearance">Aparência</div>
+          <div class="field">
+            <label class="top" for="opacity" data-i18n="opacity_label">Transparência da janela</label>
+            <div class="range-row">
+              <input type="range" id="opacity" min="60" max="100" step="1">
+              <span class="range-val" id="opacityVal">97%</span>
+            </div>
+            <div class="hint" data-i18n="opacity_hint">Quão opaco é o painel. Mais baixo = mais transparente.</div>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="compact">
+            <label for="compact" data-i18n="compact_label">Lista compacta</label>
+          </div>
+          <div class="hint" data-i18n="compact_hint">Linhas mais densas: esconde o modelo/ferramenta, só nome + luz.</div>
+        </div>
 
-  <div class="section">
-    <div class="section-title" data-i18n="sec_integration">Integração (agentes)</div>
-    <div class="btn-row">
-      <button id="installHooks" data-i18n="hooks_install_btn">Instalar/atualizar hooks</button>
-      <button id="removeHooks" class="danger" data-i18n="hooks_remove_btn">Remover hooks</button>
-    </div>
-    <div class="hint" data-i18n="hooks_hint">Registra o adapter em ~/.claude, ~/.gemini, ~/.codex e o plugin do OpenCode. No Codex, rode /hooks depois pra confiar.</div>
-  </div>
+        <div class="section">
+          <div class="section-title" data-i18n="sec_startup">Inicialização</div>
+          <div class="row">
+            <input type="checkbox" id="autostart">
+            <label for="autostart" data-i18n="autostart_label">Iniciar com o sistema</label>
+          </div>
+        </div>
+      </section>
 
-  <div class="section">
-    <div class="section-title" data-i18n="sec_window">Janela</div>
-    <div class="btn-row">
-      <button id="toggleVis" data-i18n="win_toggle_btn">Mostrar/Ocultar overlay</button>
-      <button id="quit" class="danger" data-i18n="win_quit_btn">Sair</button>
-    </div>
-  </div>
+      <!-- ===================== ABA: INTEGRAÇÃO ===================== -->
+      <section class="tab-panel" data-panel="integration" hidden>
+        <div class="section">
+          <div class="section-title" data-i18n="sec_integration">Integração (agentes)</div>
+          <div class="btn-row">
+            <button id="installHooks" data-i18n="hooks_install_btn">Instalar/atualizar hooks</button>
+            <button id="removeHooks" class="danger" data-i18n="hooks_remove_btn">Remover hooks</button>
+          </div>
+          <div class="hint" data-i18n="hooks_hint">Registra o adapter em ~/.claude, ~/.gemini, ~/.codex e o plugin do OpenCode. No Codex, rode /hooks depois pra confiar.</div>
+        </div>
 
-  <div class="section">
-    <div class="section-title" data-i18n="launch_label">Terminal para abrir agentes</div>
-    <div class="field">
-      <select id="terminal">
-        <option value="auto" data-i18n="launch_auto">Automático (primeiro disponível)</option>
-        <option value="tilix">Tilix</option>
-        <option value="gnome-terminal">GNOME Terminal</option>
-        <option value="ghostty">Ghostty</option>
-        <option value="custom" data-i18n="launch_custom">Comando customizado</option>
-      </select>
-      <div class="hint">Onde o Quick Launcher (botões + agente) abre o terminal. Custom usa <code>{cwd}</code> e <code>{cmd}</code>.</div>
-    </div>
-    <div class="field" id="terminalCmdField" hidden>
-      <label class="top" for="terminalCmd">Comando customizado</label>
-      <input id="terminalCmd" class="shortcut" placeholder="kitty --directory {cwd} -e {cmd}" style="width:100%">
-    </div>
-  </div>
+        <div class="section">
+          <div class="section-title" data-i18n="launch_label">Terminal para abrir agentes</div>
+          <div class="field">
+            <select id="terminal">
+              <option value="auto" data-i18n="launch_auto">Automático (primeiro disponível)</option>
+              <option value="tilix">Tilix</option>
+              <option value="gnome-terminal">GNOME Terminal</option>
+              <option value="ghostty">Ghostty</option>
+              <option value="custom" data-i18n="launch_custom">Comando customizado</option>
+            </select>
+            <div class="hint">Onde o Quick Launcher (botões + agente) abre o terminal. Custom usa <code>{cwd}</code> e <code>{cmd}</code>.</div>
+          </div>
+          <div class="field" id="terminalCmdField" hidden>
+            <label class="top" for="terminalCmd">Comando customizado</label>
+            <input id="terminalCmd" class="shortcut" placeholder="kitty --directory {cwd} -e {cmd}" style="width:100%">
+          </div>
+        </div>
+      </section>
 
-  <div class="actions">
-    <button id="cancel" data-i18n="btn_cancel">Cancelar</button>
-    <button id="save" class="primary" data-i18n="btn_save">Salvar</button>
-  </div>
+      <!-- ===================== ABA: SOBRE ===================== -->
+      <section class="tab-panel" data-panel="about" hidden>
+        <div class="section">
+          <div class="section-title" data-i18n="sec_window">Janela</div>
+          <div class="btn-row">
+            <button id="toggleVis" data-i18n="win_toggle_btn">Mostrar/Ocultar overlay</button>
+            <button id="quit" class="danger" data-i18n="win_quit_btn">Sair</button>
+          </div>
+        </div>
 
-  <div class="appfoot">
-    <span class="ver">AI Traffic Lights v<span id="ver">…</span></span>
-    <a id="repoLink" class="repolink" href="#" title="github.com/aronpc/ai-traffic-lights">↗ GitHub</a>
+        <div class="appfoot">
+          <span class="ver">AI Traffic Lights v<span id="ver">…</span></span>
+          <a id="repoLink" class="repolink" href="#" title="github.com/aronpc/ai-traffic-lights">↗ GitHub</a>
+        </div>
+      </section>
+    </div>
+
+    <!-- footer fixo -->
+    <div class="actions">
+      <button id="cancel" data-i18n="btn_cancel">Cancelar</button>
+      <button id="save" class="primary" data-i18n="btn_save">Salvar</button>
+    </div>
   </div>
 
   <script src="i18n.js"></script>

@@ -676,20 +676,28 @@ function saveSettingsBounds() {
     } catch {}
   }, 300);
 }
-// Mínimos que comportam TODO o conteúdo (4 seções + ações) sem rolagem —
-// o WM não deixa encolher além disso, então o layout nunca quebra.
-const SETTINGS_MIN_W = 420, SETTINGS_MIN_H = 770;
+// Mínimos que comportam a aba mais alta (Geral: 7 controles) + a barra de abas
+// + as ações, sem rolagem — o WM não deixa encolher além disso, o layout nunca
+// quebra. Bem menor que antes: com abas, só uma seção aparece por vez.
+const SETTINGS_MIN_W = 400, SETTINGS_MIN_H = 640;
 function createSettingsWindow() {
   if (settingsWin && !settingsWin.isDestroyed()) { settingsWin.show(); settingsWin.focus(); return; }
   const b = loadSettingsBounds() || {};
   settingsWin = new BrowserWindow({
-    width: Math.max(b.width || 480, SETTINGS_MIN_W),   // bounds salvos por versões
-    height: Math.max(b.height || 800, SETTINGS_MIN_H), // antigas sobem pro mínimo
+    width: Math.max(b.width || 420, SETTINGS_MIN_W),          // bounds salvos por versões
+    height: Math.max(b.height || SETTINGS_MIN_H, SETTINGS_MIN_H), // antigas sobem pro mínimo
     minWidth: SETTINGS_MIN_W, minHeight: SETTINGS_MIN_H, resizable: true,
     x: typeof b.x === 'number' ? b.x : undefined,
     y: typeof b.y === 'number' ? b.y : undefined,
     title: T('prefs_title'),
     icon: path.join(__dirname, 'assets/tray-icon.png'),
+    // Mesmo chrome custom do overlay (ver createWindow acima): sem moldura
+    // nativa + fundo transparente — o .prefs (settings.css) desenha o painel
+    // arredondado com borda e sombra, e o header .bar é arrastável.
+    frame: false,
+    transparent: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
     autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });

@@ -83,6 +83,18 @@ $save.addEventListener('click', () => {
 $opacity.addEventListener('input', () => { $opacityVal.textContent = $opacity.value + '%'; });
 $cancel.addEventListener('click', () => window.close());
 
+// ---- abas: troca de painel (client-side puro; Salvar aplica tudo de uma vez) ----
+const $tabs = document.querySelectorAll('.tab');
+const $panels = document.querySelectorAll('.tab-panel');
+function selectTab(name) {
+  for (const t of $tabs) t.classList.toggle('is-active', t.dataset.tab === name);
+  for (const p of $panels) p.hidden = p.dataset.panel !== name;
+}
+for (const t of $tabs) t.addEventListener('click', () => selectTab(t.dataset.tab));
+
+// ---- × do header: fecha a janela sem salvar (mesmo efeito de Cancelar) ----
+document.getElementById('closeBtn').addEventListener('click', () => window.close());
+
 // ---- espelho do tray: autostart, hooks, mostrar/ocultar, sair ----
 const $autostart = document.getElementById('autostart');
 $autostart.addEventListener('change', () => window.trafficLight.setAutostart($autostart.checked));

@@ -8,6 +8,7 @@
 // Tradução de eventos → vocabulário canônico do contrato:
 //   chat.message / message user           → UserPromptSubmit (captura janela ativa)
 //   tool.execute.before / after           → PreToolUse / PostToolUse
+//   tool.execute.before (ask/question)    → PermissionRequest (🔴🔑) — pergunta ao usuário
 //   session.idle                          → Stop
 //   permission.ask (HOOK) / .asked        → PermissionRequest (🔴🔑) — pediu permissão
 //   permission.replied / .updated         → Stop (respondeu → sai do vermelho)
@@ -38,6 +39,14 @@ export const AiTrafficLights = async ({ directory, $ }) => {
   }
   let lastModel = null    // último modelID visto (mensagens do assistant)
   let capturedWin = null  // janela ativa no último prompt (X11)
+
+  // Tools de PERGUNTA ao usuário: quando o agente chama uma destas, ele está
+  // ESPERANDO uma resposta sua — é um "precisa de você" (🔴🔑), não um passo de
+  // trabalho normal (verde). Frameworks autônomos (oh-my-openagent) perguntam
+  // por TOOL, não pelo fluxo de permissão do OpenCode — então é aqui que o
+  // vermelho realmente dispara nesses setups.
+  const QUESTION_TOOLS = new Set(['ask', 'question', 'ask_user_question', 'askuserquestion'])
+  const isQuestionTool = (name) => QUESTION_TOOLS.has(String(name || '').toLowerCase().replace(/[-\s]/g, '_'))
 
   const read = (file) => {
     try { return JSON.parse(fs.readFileSync(file, "utf8")) } catch { return {} }
@@ -108,7 +117,11 @@ export const AiTrafficLights = async ({ directory, $ }) => {
     },
 
     "tool.execute.before": async (input) => {
-      try { write(input && input.sessionID, "PreToolUse", input && input.tool) } catch {}
+      try {
+        const tool = input && input.tool
+        // tool de pergunta → 🔴🔑 (espera resposta); as demais → verde (rodando)
+        write(input && input.sessionID, isQuestionTool(tool) ? "PermissionRequest" : "PreToolUse", tool)
+      } catch {}
     },
 
     "tool.execute.after": async (input) => {
