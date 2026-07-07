@@ -45,15 +45,22 @@ terminal — **window _and_ tab**.
   OpenCode) from the overlay empty-state or the tray — opens the terminal in
   the last project and the session lights up automatically
 - ✏️ Double-click to rename a session (aliases persist per project)
-- 📊 **Usage & reset strip**: a pill per agent under the header shows plan
-  usage and next reset — Claude (tier + reset date + free passes) and GLM
-  Coding Plan (5h token % + monthly %). Pills go amber ≥70%, red ≥90%.
-  Codex/Gemini don't expose usage locally yet (only via runtime headers), so
-  they're omitted rather than guessed
+- 👁 **Mark a red terminal as read**: clicking a 🔴 session focuses it *and*
+  greys it out until a new notification arrives (toggle in Preferences)
+- 📊 **Per-agent usage meters** (footer): one aligned row per usage window with
+  a % meter and next reset — **Claude** (5-hour + weekly, real numbers from the
+  OAuth usage API), **Codex** (5-hour + weekly, read passively from the session
+  rollout) and **GLM Coding Plan** (5h tokens + monthly MCP). Rows go amber
+  ≥70%, red ≥90%; the last value sticks (greys out when stale) and survives
+  restarts. Toggle between the meters and the Quick Launcher in the header
+- 🎚️ **Appearance**: window transparency slider + compact list mode
+  (single dense row per session), both live and remembered
 - ⚙️ **Preferences window** (gear icon): idle threshold, global shortcut,
-  autostart, install/remove hooks, show/hide, quit — with the app version and a
-  link to the repo in the footer
-- Auto-height, drag anywhere, width-resizable, position persisted
+  autostart, install/remove hooks, appearance, show/hide, quit — with the app
+  version and a link to the repo in the footer
+- Auto-height, drag anywhere, width-resizable, position + UI state persisted
+- 🔄 **Version + update check** in the header — shows the installed version and,
+  when a newer GitHub release exists, a one-click badge to open it
 - Tray icon + global shortcut **`Ctrl+Alt+H`** (configurable)
 - Stays out of your way: no taskbar/alt-tab entry, never maximizes, no scrollbar
 
@@ -112,6 +119,9 @@ Claude Code session ──hooks──▶ traffic-hook.sh (adapter, <25ms, fork-f
 
 > **The integration contract is the state file, not the code.** Anything that
 > writes a valid JSON into the state dir becomes a light in the overlay.
+
+> See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for integration diagrams and
+> a step-by-step guide to adding an agent.
 
 ### State file contract (schema_version 2)
 

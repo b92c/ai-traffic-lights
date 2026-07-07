@@ -14,7 +14,8 @@ const CODE = ['agents.js', 'state-machine.js', 'i18n.js', 'renderer.js']
 
 function mkEl() {
   return {
-    _l: {}, _attr: {}, children: [], className: '', textContent: '', hidden: false, value: '',
+    _l: {}, _attr: {}, children: [], className: '', textContent: '', innerHTML: '', hidden: false, value: '',
+    style: { setProperty() {}, removeProperty() {} },
     classList: { add(){}, remove(){}, toggle(){}, contains(){ return false; } },
     addEventListener(t, f) { (this._l[t] = this._l[t] || []).push(f); },
     dispatch(t, ev) { (this._l[t] || []).forEach((f) => f(ev || {})); },
@@ -33,7 +34,7 @@ function mkEl() {
 // Monta um renderer isolado com uma sessão renomeável já na lista.
 async function setup() {
   const els = {};
-  for (const id of ['list', 'empty', 'counts', 'usage', 'launcher', 'verBtn', 'toggleFooterBtn', 'summaryLed', 'expandBtn', 'quitBtn', 'grip', 'settingsBtn', 'overlay']) els[id] = mkEl();
+  for (const id of ['list', 'empty', 'counts', 'usage', 'launcher', 'verBtn', 'toggleListBtn', 'summaryLed', 'expandBtn', 'quitBtn', 'grip', 'settingsBtn', 'overlay']) els[id] = mkEl();
   const calls = { setAlias: [] };
   let sessionsCb = null;
   const window = {
@@ -63,7 +64,7 @@ async function setup() {
   sessionsCb([{ session_id: 's1', pid: 111, cwd: '/home/dev/projeto-x', agent: 'claude', last_event: 'Stop', last_event_ts: now }]);
 
   const noev = { preventDefault() {}, stopPropagation() {} };
-  const labelEl = () => els.list.children[0].children[1].children[0]; // li → main → labelEl
+  const labelEl = () => els.list.children[0].children[3].children[0]; // li → main(4º: led,reason,llm,main) → labelEl
   const openRename = () => { labelEl().dispatch('dblclick', noev); return labelEl().children[0]; };
   const key = (input, k) => input.dispatch('keydown', { key: k, ...noev });
   return { ctx, els, calls, noev, openRename, key };
@@ -73,7 +74,7 @@ test('#2 guard: render() durante a edição não destrói o input', async () => 
   const { ctx, els, openRename } = await setup();
   const li0 = els.list.children[0];
   const input = openRename();
-  assert.equal(els.list.children[0].children[1].children[0].children[0], input, 'input aberto');
+  assert.equal(els.list.children[0].children[3].children[0].children[0], input, 'input aberto');
   ctx.render();                            // tick do setInterval(2s) / evento de sessão
   ctx.render();
   assert.equal(els.list.children[0], li0, 'lista intocada (render foi no-op)');
@@ -87,7 +88,7 @@ test('#2 Enter commita exatamente uma vez (blur pós-remoção não re-salva)', 
   input.dispatch('blur', noev);            // navegador dispara blur ao remover do DOM
   assert.equal(calls.setAlias.length, 1, 'salvou só 1x');
   assert.equal(calls.setAlias[0][1], 'Meu Alias', 'salvou o valor digitado');
-  assert.notEqual(els.list.children[0].children[1].children[0].children[0], input, 'lista re-renderizou');
+  assert.notEqual(els.list.children[0].children[3].children[0].children[0], input, 'lista re-renderizou');
 });
 
 test('#2 Escape cancela sem salvar (nem no blur seguinte)', async () => {

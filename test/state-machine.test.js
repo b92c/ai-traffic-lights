@@ -20,6 +20,47 @@ test('computeState: razões explícitas de "precisa de você" → vermelho', () 
   assert.deepEqual(computeState(state('Notification'), NOW), { level: 'awaiting', reason: 'question' }, 'sem tipo → vermelho conservador');
 });
 
+test('computeState: readAt rebaixa vermelho → read (cinza) quando cobre o evento', () => {
+  // sessão vermelha por permissão, evento em NOW-10
+  const s = state('PermissionRequest', 10);        // last_event_ts = NOW - 10
+  // sem readAt → vermelho normal
+  assert.deepEqual(computeState(s, NOW), { level: 'awaiting', reason: 'permission' });
+  // readAt >= last_event_ts → LIDO (cinza), preserva a razão
+  assert.deepEqual(computeState(s, NOW, null, NOW - 10), { level: 'read', reason: 'permission' });
+  assert.deepEqual(computeState(s, NOW, null, NOW), { level: 'read', reason: 'permission' });
+});
+
+test('computeState: evento vermelho NOVO (ts > readAt) reacende', () => {
+  // marcou lido em NOW-100, mas o evento é mais recente (NOW-5)
+  const s = state('PostToolUseFailure', 5);        // last_event_ts = NOW - 5
+  assert.deepEqual(computeState(s, NOW, null, NOW - 100), { level: 'awaiting', reason: 'error' },
+    'notificação nova depois da marca → volta a vermelho');
+});
+
+test('computeState: readAt NÃO afeta amarelo nem verde', () => {
+  // processando (amarelo) nunca vira cinza
+  assert.deepEqual(computeState(state('PreToolUse'), NOW, null, NOW), { level: 'processing', reason: 'tool' });
+  // terminado (verde) nunca vira cinza
+  assert.deepEqual(computeState(state('Stop'), NOW, null, NOW), { level: 'done', reason: 'ok' });
+});
+
+test('computeState: idle escalado (awaiting) também pode ser marcado lido', () => {
+  // Stop antigo → escalou pra awaiting/idle; readAt cobrindo → read
+  const s = state('Stop', 400);                    // > threshold default (300s)
+  assert.deepEqual(computeState(s, NOW, null), { level: 'awaiting', reason: 'idle' });
+  assert.deepEqual(computeState(s, NOW, null, NOW - 400), { level: 'read', reason: 'idle' });
+});
+
+test('iconFor: nível read → 👁', () => {
+  assert.equal(iconFor({ level: 'read', reason: 'permission' }), '👁');
+});
+
+test('sortByUrgency: read vai pro fim (menos urgente que done)', () => {
+  const mk = (level, ts) => ({ s: { last_event_ts: ts }, st: { level } });
+  const out = sortByUrgency([mk('read', 100), mk('awaiting', 50), mk('done', 80), mk('processing', 90)]);
+  assert.deepEqual(out.map((x) => x.st.level), ['awaiting', 'processing', 'done', 'read']);
+});
+
 test('computeState: Notification classifica por notification_type (não por message)', () => {
   const notif = (type) => ({ ...state('Notification'), notification_type: type });
   // benignos → verde (auth/elicitação concluída/respondida)

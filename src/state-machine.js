@@ -40,9 +40,24 @@ const REASON_ICON = {
  * @param {object} state  state file parseado {last_event, last_event_ts, ...}
  * @param {number} nowSec  epoch atual (Date.now()/1000)
  * @param {object} [cfg]   {idleThresholdSec, escalateIdle} — configurável
- * @returns {{level:'processing'|'done'|'awaiting', reason:string|null}}
+ * @param {number} [readAt]  ts (epoch s) até o qual a sessão foi marcada LIDA.
+ *   Se a sessão estaria 'awaiting' mas o último evento é <= readAt (nenhuma
+ *   notificação nova desde a marca), rebaixa para 'read' (cinza). Um evento
+ *   vermelho com last_event_ts > readAt reacende naturalmente.
+ * @returns {{level:'processing'|'done'|'awaiting'|'read', reason:string|null}}
  */
-function computeState(state, nowSec, cfg) {
+function computeState(state, nowSec, cfg, readAt) {
+  const st = baseState(state, nowSec, cfg);
+  // "Marcar como lido": só rebaixa vermelhos (awaiting) e só se a marca cobre o
+  // evento atual. Amarelo/verde nunca viram cinza. O readAt é por-sessão.
+  if (st.level === 'awaiting' && typeof readAt === 'number'
+      && (state.last_event_ts || 0) <= readAt) {
+    return { level: 'read', reason: st.reason };
+  }
+  return st;
+}
+
+function baseState(state, nowSec, cfg) {
   const last = state.last_event;
   const escalate = cfg ? cfg.escalateIdle : DEFAULT_ESCALATE_IDLE;
   const threshold = cfg ? cfg.idleThresholdSec : DEFAULT_IDLE_THRESHOLD_SEC;
@@ -75,14 +90,16 @@ function computeState(state, nowSec, cfg) {
 }
 
 function iconFor(st) {
+  if (st.level === 'read') return '👁';                 // lido (silenciado até nova notificação)
   return REASON_ICON[st.reason] || (st.level === 'processing' ? '🛠' : '✓');
 }
 
 // ---- ordenação por urgência (vermelhos no topo) ----
-// Rank: awaiting (🔴) < processing (🟡) < done (🟢). Mesmo nível:
+// Rank: awaiting (🔴) < processing (🟡) < done (🟢) < read (cinza, resolvido).
+// Mesmo nível:
 //  · awaiting  → mais antiga primeiro (quem espera há mais tempo é mais urgente)
 //  · demais    → mais recente primeiro (atividade nova visível)
-const URGENCY_RANK = { awaiting: 0, processing: 1, done: 2 };
+const URGENCY_RANK = { awaiting: 0, processing: 1, done: 2, read: 3 };
 function sortByUrgency(ranked) {
   return [...ranked].sort((a, b) => {
     const la = (a.st && a.st.level) || 'done';

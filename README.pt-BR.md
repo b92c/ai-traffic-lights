@@ -44,15 +44,22 @@ por sessão, clique para pular pro terminal — **janela _e_ aba**.
   OpenCode) pelo empty state do overlay ou pelo tray — abre o terminal no
   último projeto e a sessão acende sozinha
 - ✏️ Duplo-clique renomeia a sessão (apelidos persistem por projeto)
-- 📊 **Faixa de consumo/reset**: uma pílula por agente sob o cabeçalho mostra
-  o uso do plano e o próximo reset — Claude (tier + data de reset + passes) e
-  GLM Coding Plan (% de tokens em 5h + % mensal). Pílulas ficam âmbar ≥70%,
-  vermelhas ≥90%. Codex/Gemini ainda não expõem uso localmente (só via headers
-  em runtime), então são omitidos em vez de chutados
+- 👁 **Marcar terminal vermelho como lido**: clicar numa sessão 🔴 foca o
+  terminal *e* a deixa cinza até chegar uma nova notificação (opção nas Preferências)
+- 📊 **Medidores de uso por agente** (rodapé): uma linha alinhada por janela de
+  uso, com barra de % e próximo reset — **Claude** (5h + semanal, números reais
+  da API OAuth de uso), **Codex** (5h + semanal, lidos passivamente do rollout
+  da sessão) e **GLM Coding Plan** (tokens 5h + MCP mensal). Linhas ficam âmbar
+  ≥70%, vermelhas ≥90%; o último valor persiste (fica cinza quando velho) e
+  sobrevive a reinícios. Alterne entre os medidores e o Quick Launcher no cabeçalho
+- 🎚️ **Aparência**: slider de transparência da janela + modo de lista compacta
+  (uma linha densa por sessão), ambos ao vivo e lembrados
 - ⚙️ **Janela de Preferências** (ícone de engrenagem): threshold de idle,
-  atalho global, autostart, instalar/remover hooks, mostrar/ocultar, sair —
-  com a versão do app e um link do repo no rodapé
-- Altura automática, arrasta por qualquer lugar, largura ajustável, posição persistida
+  atalho global, autostart, instalar/remover hooks, aparência, mostrar/ocultar,
+  sair — com a versão do app e um link do repo no rodapé
+- Altura automática, arrasta por qualquer lugar, largura ajustável, posição + estado da UI persistidos
+- 🔄 **Versão + checagem de atualização** no cabeçalho — mostra a versão instalada
+  e, quando há release mais nova no GitHub, um selo de um clique pra abri-la
 - Ícone no tray + atalho global **`Ctrl+Alt+H`** (configurável)
 - Sai do caminho: fora da barra de janelas/alt-tab, nunca maximiza, sem scrollbar
 
@@ -111,6 +118,9 @@ Sessão Claude Code ──hooks──▶ traffic-hook.sh (adapter, <25ms, fork-f
 
 > **O contrato de integração é o state file, não o código.** Qualquer coisa
 > que escreva um JSON válido no diretório de estado vira uma luz no overlay.
+
+> Veja [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) para diagramas de integração
+> e um guia passo-a-passo de como adicionar um agente. _(em inglês)_
 
 ### Contrato do state file (schema_version 2)
 

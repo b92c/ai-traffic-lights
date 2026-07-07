@@ -14,6 +14,7 @@ const DEFAULTS = Object.freeze({
   collapsed: false,             // estado da janela: recolhido (só header+rodapé) | expandido
   opacity: 0.97,               // transparência do painel (0.6–1.0; alpha do fundo do overlay)
   compact: false,              // lista de sessões densa (esconde a sub-linha, aperta o padding)
+  markReadOnClick: true,       // clicar num terminal vermelho marca como lido (cinza) até a próxima notificação
 });
 
 // Teclas válidas p/ um accelerator do Electron (subset seguro).
@@ -52,6 +53,7 @@ function mergeWithDefaults(raw) {
       out.opacity = Math.max(0.6, Math.min(1.0, raw.opacity));
     }
     if (typeof raw.compact === 'boolean') out.compact = raw.compact;
+    if (typeof raw.markReadOnClick === 'boolean') out.markReadOnClick = raw.markReadOnClick;
     if (isValidShortcut(raw.shortcut)) out.shortcut = raw.shortcut;
     if (raw.lang === 'auto' || raw.lang === 'en' || raw.lang === 'pt') out.lang = raw.lang;
     const TERMINAL_OK = new Set(['auto', 'tilix', 'gnome-terminal', 'ghostty', 'custom']);

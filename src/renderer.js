@@ -11,6 +11,7 @@ let firstRender = true;                    // hidrata prevLevels sem alertar no 
 const prevLevels = new Map();              // pid -> level (detecção de transição p/ vermelho)
 const lastAlert = new Map();               // pid -> ms (rate-limit do alerta)
 const snoozed = new Map();                 // key -> ms (silencia o ALERTA até então; a cor fica)
+const readMarks = new Map();               // key -> ts (epoch s): sessão marcada LIDA até esse evento; > → cinza
 let everHadSessions = false;               // onboarding: mostra "instalar hooks" só enquanto nunca teve sessão
 let launchers = [];                        // Quick Launcher: [{id,label}] dos CLIs detectados
 let usageEntries = [];                     // consumo/reset: [{agent,title,usedPct,resetAt,resetInMin,extra,source,error}]
@@ -33,6 +34,7 @@ const $counts = document.getElementById('counts');
 const $usage = document.getElementById('usage');
 const $ver = document.getElementById('verBtn');
 const $toggleList = document.getElementById('toggleListBtn');
+const $toggleFooter = document.getElementById('toggleFooterBtn');
 const $summaryLed = document.getElementById('summaryLed');
 const $expand = document.getElementById('expandBtn');
 const $quit = document.getElementById('quitBtn');
@@ -154,19 +156,24 @@ function render() {
   if (renaming) return;                    // não destrói o input aberto (issue #2)
   const nowSec = Math.floor(Date.now() / 1000);
   let worst = 'done';
-  const tally = { processing: 0, done: 0, awaiting: 0 };
+  const tally = { processing: 0, done: 0, awaiting: 0, read: 0 };
+  const markRead = !settingsCfg || settingsCfg.markReadOnClick !== false;
 
   // 1. computa estado de cada sessão (+ tally/worst no mesmo passo).
   const ranked = sessions.map((s) => {
-    const st = computeState(s, nowSec, settingsCfg);
+    const key = s.pid || s.session_id;
+    // readAt só conta se a feature está ligada; senão computeState ignora.
+    const readAt = markRead ? readMarks.get(key) : undefined;
+    const st = computeState(s, nowSec, settingsCfg, readAt);
     tally[st.level]++;
     if (st.level === 'awaiting') worst = 'awaiting';
     else if (st.level === 'processing' && worst !== 'awaiting') worst = 'processing';
 
     // Alerta ao TRANSITAR pra vermelho (rate-limit 30s/sessão). Na 1ª render
     // só hidrata prevLevels — uma sessão que JÁ estava vermelha ao abrir o app
-    // não deve apitar (só transições reais disparam alerta).
-    const key = s.pid || s.session_id;
+    // não deve apitar (só transições reais disparam alerta). Sessão marcada
+    // lida está em 'read' (não 'awaiting'), então não apita — reacende só com
+    // evento vermelho novo (que volta pra 'awaiting' e passa por aqui).
     const was = prevLevels.get(key);
     if (!firstRender && st.level === 'awaiting' && was !== 'awaiting' && !isSnoozed(key)) {
       const nowMs = Date.now();
@@ -179,12 +186,21 @@ function render() {
     return { s, st };
   });
 
+  // Limpa estado por-sessão de sessões que morreram (evita crescer sem limite
+  // em uso longo). readMarks/prevLevels/lastAlert/snoozed são chaveados por
+  // pid||session_id; qualquer chave fora do conjunto vivo é lixo.
+  const liveKeys = new Set(sessions.map((s) => s.pid || s.session_id));
+  for (const m of [readMarks, prevLevels, lastAlert, snoozed]) {
+    for (const k of m.keys()) if (!liveKeys.has(k)) m.delete(k);
+  }
+
   // 2. ordena por urgência: 🔴 no topo, depois 🟡, depois 🟢 (state-machine.js).
   const ordered = sortByUrgency(ranked);
 
   // 3. monta as linhas na ordem ordenada.
   const rows = ordered.map(({ s, st }) => {
     const label = labelFor(s);
+    const key = s.pid || s.session_id;     // p/ marcar como lido no clique
     const agent = AGENTS[agentOf(s)];
     // O ícone da LLM (à esquerda) já mostra QUAL agente — então o texto não
     // repete o nome do agente. Normal: modelo · ferramenta · tempo.
@@ -193,8 +209,10 @@ function render() {
       s.last_tool ? s.last_tool : (s.last_event || ''),
       ageText(nowSec, s.last_event_ts),
     ].filter(Boolean).join(' · ');
-    // Compacto: mais enxuto — só ferramenta · tempo (modelo cabe no tooltip).
+    // Compacto: modelo · ferramenta · tempo (o ícone da LLM à esquerda já diz o
+    // agente; o modelo distingue qual variante — glm-5.2, gpt-5, etc.).
     const subCompact = [
+      s.model,
       s.last_tool ? s.last_tool : (s.last_event || ''),
       ageText(nowSec, s.last_event_ts),
     ].filter(Boolean).join(' · ');
@@ -209,6 +227,12 @@ function render() {
     let clickTimer = null;
     li.addEventListener('click', () => {
       if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; return; } // 2º click do dblclick
+      // Marcar como lido: o MESMO clique foca E silencia o vermelho (vira cinza)
+      // — carimba até o evento atual; uma notificação nova (ts maior) reacende.
+      if (markRead && st.level === 'awaiting') {
+        readMarks.set(key, s.last_event_ts || nowSec);
+        render();                            // reflete o cinza na hora
+      }
       clickTimer = setTimeout(() => {
         clickTimer = null;
         window.trafficLight.focus({ pid: s.pid, windowid: s.windowid, focus_url: s.focus_url, tilix_id: s.tilix_id });
@@ -354,8 +378,10 @@ function resetClock(resetAt, resetInMin) {
 function applyAppearance() {
   const op = settingsCfg && typeof settingsCfg.opacity === 'number' ? settingsCfg.opacity : 0.97;
   document.documentElement.style.setProperty('--bg-alpha', String(Math.max(0.6, Math.min(1, op))));
+  const compact = !!(settingsCfg && settingsCfg.compact);
   const $ov = document.getElementById('overlay');
-  if ($ov) $ov.classList.toggle('compact', !!(settingsCfg && settingsCfg.compact));
+  if ($ov) $ov.classList.toggle('compact', compact);
+  if ($toggleList) $toggleList.classList.toggle('is-on', compact); // header: destaca quando compacto
   autosize();
 }
 
@@ -374,7 +400,7 @@ function applyFooterMode() {
   const $l = document.getElementById('launcher');
   if (showUsage) { if ($l) $l.hidden = true; }
   else { if ($usage) $usage.hidden = true; }
-  if ($toggleFooter) $toggleFooter.classList.toggle('is-usage', showUsage);
+  if ($toggleFooter) $toggleFooter.classList.toggle('is-on', !showUsage); // destaca no modo launcher
   // Re-mede a altura: expandido → autosize; recolhido → altura do rodapé novo
   // (autosize é no-op quando recolhido, então a janela mantinha o espaço do
   // rodapé anterior — sobrava vazio ao trocar usage↔launcher recolhido).
@@ -462,27 +488,8 @@ function renderUsage() {
     row.append(icon, name, read, meter, rst);
     return row;
   });
-  $usage.replaceChildren(...rows, footerToggleBtn());
+  $usage.replaceChildren(...rows);
   $usage.hidden = false;
-}
-
-// Botão que alterna o RODAPÉ (uso ⇄ launcher), fixado no canto do rodapé (não
-// mais no header — o header agora hospeda o toggle da LISTA). Posicionado
-// absoluto no canto direito da barra ativa. Persiste em settings.showUsage.
-function footerToggleBtn() {
-  const b = document.createElement('button');
-  b.className = 'footer-toggle';
-  b.setAttribute('data-tip', T('tooltip_toggle_footer'));
-  // ícone: quando mostrando uso → ícone de "launcher/grade"; senão → "barras".
-  b.innerHTML = footerShowsUsage()
-    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>'
-    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="16" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="11" y2="17"/></svg>';
-  b.addEventListener('click', (e) => {
-    e.stopPropagation();
-    persistUI({ showUsage: !footerShowsUsage() });
-    applyFooterMode();
-  });
-  return b;
 }
 
 function renderLauncher() {
@@ -502,7 +509,6 @@ function renderLauncher() {
     btn.addEventListener('click', (e) => { e.stopPropagation(); window.trafficLight.launchAgent({ agent: l.id }); });
     $bar.append(btn);
   }
-  $bar.append(footerToggleBtn());          // toggle uso⇄launcher no canto do rodapé
   // Launcher só aparece quando o modo do rodapé NÃO é uso e há launchers.
   $bar.hidden = footerShowsUsage() || launchers.length === 0;
 }
@@ -561,10 +567,15 @@ $expand.addEventListener('click', () => {
 $quit.addEventListener('click', () => window.trafficLight.toggleVisibility()); // × esconde (tray)
 document.getElementById('settingsBtn').addEventListener('click', () => window.trafficLight.openSettings());
 
-// Toggle do rodapé: alterna uso/launcher e persiste em settings.showUsage.
+// Toggle da LISTA (header): alterna normal/compacto e persiste em settings.compact.
+if ($toggleList) $toggleList.addEventListener('click', () => {
+  const next = !(settingsCfg && settingsCfg.compact);
+  persistUI({ compact: next });
+  applyAppearance();                        // aplica a classe .compact + reajusta altura
+});
+// Toggle do RODAPÉ (header): alterna uso ⇄ launcher e persiste em settings.showUsage.
 if ($toggleFooter) $toggleFooter.addEventListener('click', () => {
-  const next = !footerShowsUsage();
-  persistUI({ showUsage: next });
+  persistUI({ showUsage: !footerShowsUsage() });
   applyFooterMode();
 });
 

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Mark a red terminal as read.** Clicking a 🔴 session now both focuses its
+  terminal and marks it read — the light goes grey (⚪) and stops nagging until
+  a *new* notification arrives (a red event newer than the moment you clicked
+  re-lights it). On by default; toggle in Preferences → Behavior
+  (`settings.markReadOnClick`). Amber/green are never affected; the read state
+  is per live session (a restart brings the red back).
+- **Architecture docs.** New [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) with
+  Mermaid diagrams (integration flow · state-file lifecycle · event→color ·
+  session discovery), the full state-file schema, and a step-by-step guide to
+  adding a new agent/IDE — linked from the README.
 - **Per-agent usage footer — a meter panel.** The footer shows one row per
   usage window as an aligned meter (CSS-grid shared columns, so every track is
   identical and the reset column keeps equal space): agent icon · name · big %
@@ -47,11 +57,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   two knobs, applied live (no restart) and persisted:
   - **Window transparency** — a slider (60–100%) sets how opaque the panel is,
     driving the overlay's background alpha (`settings.opacity`, default 0.97).
-  - **Compact list** — denser session rows: hides the model/tool sub-line,
-    tightens the padding, just name + light (`settings.compact`, default off).
-- **Footer toggle (usage ⇄ launcher).** A header button switches the footer
-  between the usage rows and the Quick Launcher icon bar — only one shows at a
-  time. The choice persists in `settings.showUsage` (default: usage).
+  - **Compact list** — a one-line-per-session mode: fixed columns that align
+    across rows (`status light · reason icon · agent icon · name — model · tool
+    · time`), the agent's coloured icon standing beside its name, all on a
+    single tight line (`settings.compact`, default off). A header button toggles
+    it too.
+- **Session rows redesigned.** Every row now carries the agent's coloured
+  LLM/CLI icon in its own aligned column, and the alert-bell column is always
+  reserved — showing or hiding the bell no longer nudges the row's size. The
+  window's minimum width grew to keep every header button (list · footer ·
+  preferences · expand · close) visible.
 - **UI state persists across restarts.** The footer mode (`showUsage`) and the
   collapsed/expanded window state (`collapsed`) are saved to `settings.json` and
   restored on launch — no Preferences UI, just remembered. Toggling the footer

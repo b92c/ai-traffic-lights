@@ -68,6 +68,13 @@ test('mergeWithDefaults: compact (lista densa) default false, aceita bool', () =
   assert.equal(mergeWithDefaults({ compact: 1 }).compact, false);   // não-bool → default
 });
 
+test('mergeWithDefaults: markReadOnClick default true, aceita bool', () => {
+  assert.equal(DEFAULTS.markReadOnClick, true);
+  assert.equal(mergeWithDefaults({}).markReadOnClick, true);
+  assert.equal(mergeWithDefaults({ markReadOnClick: false }).markReadOnClick, false);
+  assert.equal(mergeWithDefaults({ markReadOnClick: 'x' }).markReadOnClick, true); // inválido → default
+});
+
 test('mergeWithDefaults: atalho inválido é ignorado (mantém default)', () => {
   assert.equal(mergeWithDefaults({ shortcut: 'H' }).shortcut, DEFAULTS.shortcut);
   assert.equal(mergeWithDefaults({ shortcut: 'Control+Que' }).shortcut, DEFAULTS.shortcut);

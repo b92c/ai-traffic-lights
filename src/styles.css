@@ -248,6 +248,10 @@ html, body {
 .led--processing { background: var(--amber); box-shadow: 0 0 8px rgba(224,160,32,0.75); }
 .led--done       { background: var(--green); box-shadow: 0 0 6px rgba(63,185,107,0.55); }
 .led--awaiting   { background: var(--red);   box-shadow: 0 0 10px rgba(224,86,63,0.9); animation: pulse 1.4s ease-in-out infinite; }
+/* read: vermelho marcado como lido — cinza apagado, sem brilho nem pulso.
+   A linha inteira esmaece pra sinalizar "resolvido, aguardando nova notif". */
+.led--read       { background: var(--ink-dim); box-shadow: none; }
+.row:has(.led--read) { opacity: 0.6; }
 
 @keyframes pulse {
   0%, 100% { box-shadow: 0 0 6px rgba(224,86,63,0.5); transform: scale(1); }
@@ -324,8 +328,8 @@ html, body {
   font-weight: 700; cursor: pointer;
 }
 .btn-ver.has-update:hover { background: rgba(63,185,107,0.26); }
-/* estado do toggle de rodapé: leve destaque quando mostrando USO */
-#toggleFooterBtn.is-usage { color: var(--ink); }
+/* toggle da lista no header: destaca quando o modo compacto está ativo */
+#toggleListBtn.is-on { color: var(--ink); background: rgba(255,255,255,0.08); }
 
 /* Colunas fixas p/ alinhar entre linhas: [led] [motivo] [LLM] [nome…] [sino].
    O nome (main) é a única coluna elástica; as demais têm largura fixa. */

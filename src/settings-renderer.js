@@ -8,6 +8,7 @@ const $sc = document.getElementById('shortcut');
 const $opacity = document.getElementById('opacity');
 const $opacityVal = document.getElementById('opacityVal');
 const $compact = document.getElementById('compact');
+const $markRead = document.getElementById('markRead');
 const $save = document.getElementById('save');
 const $cancel = document.getElementById('cancel');
 
@@ -74,6 +75,7 @@ $save.addEventListener('click', () => {
   if ($terminal.value === 'custom') cfg.terminalCmd = $terminalCmd.value.trim();
   cfg.opacity = (parseInt($opacity.value, 10) || 97) / 100; // slider 60–100 → 0.6–1.0
   cfg.compact = $compact.checked;          // lista densa
+  cfg.markReadOnClick = $markRead.checked; // clique marca como lido
   window.trafficLight.saveSettings(cfg);   // main aplica (atalho + idioma + overlay) e fecha
   window.close();
 });
@@ -116,6 +118,7 @@ window.trafficLight.getSettings().then((c) => {
   $opacity.value = String(opct);
   $opacityVal.textContent = opct + '%';
   $compact.checked = !!c.compact;
+  $markRead.checked = c.markReadOnClick !== false; // default ligado
   syncTerminalCmdField();
 });
 // ---- Quick Launcher: mostra o campo de comando custom só no modo 'custom' ----

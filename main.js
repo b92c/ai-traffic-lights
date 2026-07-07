@@ -86,7 +86,7 @@ for (const [id, a] of Object.entries(AGENTS)) {
 
 const DEFAULT_W = 360;
 const HEADER_H = 58; // tem que casar com --header-h do CSS
-const MIN_W = 320, MAX_W = 720; // 320: header inteiro (ícone+título+contadores+botões) sem quebrar
+const MIN_W = 348, MAX_W = 720; // 348: header com 5 botões (lista+footer+prefs+expand+fechar) sem cortar o ×
 const MIN_H = HEADER_H + 40, MAX_H = 640;
 
 let win;
@@ -894,6 +894,37 @@ function glmCredsFromSessions() {
   return [...byToken.values()];
 }
 
+// FALLBACK: o processo PRINCIPAL do Claude Code às vezes não herda as env vars
+// do GLM no environ (lançado via wrapper/alias que não repassa), mas seus
+// SUBPROCESSOS sim (MCP servers, shells filhos, etc.). Se glmCredsFromSessions
+// não achou nada nos pids das sessões, varre todo o /proc procurando qualquer
+// processo com ANTHROPIC_BASE_URL (z.ai/bigmodel) + token. A conta é uma só —
+// qualquer processo que tenha as credenciais serve pra buscar o % do plano.
+// Dedup por token. Nunca lança; só lê o que o dono consegue (EACCES → skip).
+function glmCredsFromProc() {
+  const byToken = new Map();
+  let pids;
+  try { pids = fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)); } catch { return []; }
+  for (const pid of pids) {
+    let raw;
+    try { raw = fs.readFileSync(`/proc/${pid}/environ`, 'utf8'); } catch { continue; } // EACCES/morto
+    const env = usage.parseEnviron(raw, ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN']);
+    if (!env.ANTHROPIC_BASE_URL || !env.ANTHROPIC_AUTH_TOKEN) continue;
+    if (!/api\.z\.ai|bigmodel\.cn/.test(env.ANTHROPIC_BASE_URL)) continue; // só backend GLM
+    const token = env.ANTHROPIC_AUTH_TOKEN;
+    if (byToken.has(token)) continue;
+    let suffix;
+    try { suffix = crypto_().createHash('sha256').update(token).digest('hex').slice(0, 6); }
+    catch { suffix = String(byToken.size + 1); }
+    let label = '';
+    try { label = new URL(env.ANTHROPIC_BASE_URL).host.replace(/^api\./, ''); } catch {}
+    byToken.set(token, { env, label, suffix });
+    // bastam 2 contas distintas — não precisa varrer os ~1000 processos todos
+    if (byToken.size >= 2) break;
+  }
+  return [...byToken.values()];
+}
+
 // Codex é passivo: o uso vive no rollout da sessão, associado por cwd. As
 // sessões Codex vivas são detectadas por /proc (sem state file próprio) e o
 // cwd é lido de /proc/<pid>/cwd (symlink legível pelo dono — ao contrário do
@@ -915,10 +946,15 @@ function codexCwdsFromSessions() {
 async function collectAndSendUsage() {
   try {
     let glmCreds = glmCredsFromSessions();
-    // Fallback: o próprio app foi lançado de um terminal GLM (vars já no env).
+    // Fallback 1: o próprio app foi lançado de um terminal GLM (vars já no env).
     if (!glmCreds.length && process.env.ANTHROPIC_BASE_URL && process.env.ANTHROPIC_AUTH_TOKEN) {
       glmCreds = [{ env: process.env }];
     }
+    // Fallback 2: o processo principal do Claude Code às vezes não herda as
+    // vars, mas subprocessos sim. Varre o /proc inteiro procurando qualquer
+    // processo com credenciais z.ai (a conta é uma só). Resolve o bug do GLM
+    // "parar de atualizar" quando nenhuma sessão-monitorada tem as vars no environ.
+    if (!glmCreds.length) glmCreds = glmCredsFromProc();
     const codexCwds = codexCwdsFromSessions();
     const entries = await usage.collectUsage({ glmCreds, codexCwds });
     // Funde com o último estado: mantém o valor bom de cada linha se a coleta
