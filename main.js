@@ -676,8 +676,9 @@ function saveSettingsBounds() {
   settingsBoundsTimer = setTimeout(() => {
     try {
       const [x, y] = settingsWin.getPosition();
-      const [width, height] = settingsWin.getSize();
-      fs.writeFileSync(SETTINGS_BOUNDS_FILE, JSON.stringify({ x, y, width, height }));
+      // Só a posição: o tamanho é fixo (SETTINGS_W/H) e ignorado no load —
+      // gravá-lo só persistiria dados mortos e confundiria versões futuras.
+      fs.writeFileSync(SETTINGS_BOUNDS_FILE, JSON.stringify({ x, y }));
     } catch {}
   }, 300);
 }
