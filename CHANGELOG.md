@@ -40,10 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     **passively** from the session's rollout (`~/.codex/sessions/**/rollout-*.jsonl`,
     last `token_count` event → `rate_limits`). No network — matched to the live
     session by cwd (`/proc/<pid>/cwd`).
-  - **Antigravity** (Gemini CLI) shows a label-only row `Antigravity (<model>)`
-    read passively from `~/.gemini/antigravity-cli/settings.json` — Google
-    doesn't expose consumption, so there's no % (like Claude's plan-only
-    fallback).
+  - **Antigravity** (Gemini CLI) shows `Antigravity (<model>)` read passively
+    from `~/.gemini/antigravity-cli/settings.json`. Google doesn't expose a
+    running usage %, but when a model's quota is **exhausted** the conversation
+    DBs record the API's `QUOTA_EXHAUSTED` error with its weekly reset time — so
+    an exhausted model shows a full red bar (100%) and the reset countdown;
+    otherwise it's the label alone.
     New `src/usage.js` (pure parsers + I/O, unit tested); collectors run on a
     60s cadence decoupled from the 5s session loop; responses cached 30s and
     never throw.

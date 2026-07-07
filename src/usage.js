@@ -408,12 +408,14 @@ function defaultReadHead(f) {
 }
 function defaultReadFull(f) { return fs.readFileSync(f, 'utf8'); }
 
-// ---- Antigravity / Gemini CLI (Google Code Assist) — só RÓTULO ----
-// PASSIVO, sem rede: o modelo ativo fica em ~/.gemini/antigravity-cli/settings.json
-// ("model": "..."). É só um rótulo — o % de uso é INVIÁVEL de obter (o Google
-// não expõe consumo; o endpoint loadCodeAssist só devolve o tier do plano, e o
-// CLI conta requisições em RAM). Então mostramos "Antigravity (<modelo>)" com
-// usedPct sempre null — igual ao fallback plano-só do Claude sem token.
+// ---- Antigravity / Gemini CLI (Google Code Assist) ----
+// PASSIVO, sem rede. Duas fontes:
+//  1. RÓTULO: o modelo ativo em ~/.gemini/antigravity-cli/settings.json.
+//  2. QUOTA ESGOTADA: os DBs de conversa (~/.gemini/antigravity-cli/conversations/
+//     *.db) gravam a resposta de erro QUOTA_EXHAUSTED da API, que traz o
+//     quotaResetTimeStamp (reset semanal). O Google NÃO expõe % contínuo — só
+//     sabemos "esgotado" quando estoura. Então: com quota → só o rótulo (—);
+//     esgotado → usedPct=100 (barra cheia/vermelha) + reset.
 // Síncrona (não faz rede) → collectUsage a envolve num Promise.resolve.
 
 // Parser puro: extrai o rótulo do objeto settings já lido. Testável.
@@ -424,24 +426,78 @@ function parseAntigravityTier(settings) {
   return { model };
 }
 
-// Lê o rótulo do Antigravity de ~/.gemini/antigravity-cli/settings.json. Sem
-// arquivo → null (omitido). Nunca lança. `readFile` injetável pra teste.
-function readAntigravityUsage({ home, readFile } = {}) {
-  const file = path.join(home || process.env.HOME, '.gemini', 'antigravity-cli', 'settings.json');
+// Parser puro: acha o QUOTA_EXHAUSTED com o MAIOR quotaResetTimeStamp num texto
+// (o conteúdo bruto de um .db, lido como string). Devolve {resetAt} ISO ou null.
+// Regex-based (o .db é binário/protobuf; os JSONs de erro ficam legíveis dentro).
+function parseAntigravityQuota(dbText, now) {
+  if (typeof dbText !== 'string') return null;
+  const nowMs = now || Date.now();
+  let bestTs = 0, bestAt = null;
+  const re = /QUOTA_EXHAUSTED[^]*?"quotaResetTimeStamp":"([^"]+)"/g;
+  let m;
+  while ((m = re.exec(dbText))) {
+    const ms = Date.parse(m[1]);
+    if (Number.isNaN(ms)) continue;
+    if (ms > bestTs) { bestTs = ms; bestAt = m[1]; }
+  }
+  // só conta se o reset é no FUTURO (quota realmente esgotada agora).
+  if (bestAt && bestTs > nowMs) return { resetAt: bestAt };
+  return null;
+}
+
+// Lê o uso do Antigravity. Rótulo do settings.json + estado de quota dos DBs de
+// conversa (o mais recente por mtime). Sem settings → null. Nunca lança.
+// I/O injetável (readFile, listDbs, readDb, mtime) pra teste.
+function readAntigravityUsage({ home, now, readFile, listDbs, readDb, mtime } = {}) {
+  const base = path.join(home || process.env.HOME, '.gemini', 'antigravity-cli');
   let settings;
   try {
-    const raw = (readFile || ((f) => fs.readFileSync(f, 'utf8')))(file);
+    const raw = (readFile || ((f) => fs.readFileSync(f, 'utf8')))(path.join(base, 'settings.json'));
     settings = JSON.parse(raw);
   } catch { return null; } // sem Antigravity configurado
   const t = parseAntigravityTier(settings);
   if (!t) return null;
+
+  // quota esgotada: varre os DBs de conversa, o mais recente primeiro; para no 1º
+  // QUOTA_EXHAUSTED com reset futuro. Limita a leitura pra não custar caro.
+  let quota = null;
+  try {
+    const list = (listDbs || defaultListAntigravityDbs)(base);
+    const stat = mtime || ((f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } });
+    const read = readDb || ((f) => fs.readFileSync(f, 'latin1')); // latin1: extrai os JSONs sem quebrar em bytes binários
+    const sorted = list.map((f) => ({ f, m: stat(f) })).sort((a, b) => b.m - a.m).slice(0, 8); // só os 8 mais novos
+    for (const { f } of sorted) {
+      let txt;
+      try { txt = read(f); } catch { continue; }
+      const q = parseAntigravityQuota(txt, now);
+      if (q) { quota = q; break; }
+    }
+  } catch { /* sem DBs / sem permissão → segue só com rótulo */ }
+
+  const nowMs = now || Date.now();
   const plan = t.model ? 'Antigravity (' + t.model + ')' : 'Antigravity';
+  if (quota) {
+    const resetInMin = Math.max(0, Math.round((Date.parse(quota.resetAt) - nowMs) / 60000));
+    return [{
+      id: 'antigravity-quota', agent: 'antigravity', title: null, plan,
+      usedPct: 100,                        // esgotado → barra cheia (vermelha)
+      resetAt: quota.resetAt, resetInMin, extra: null,
+      source: 'antigravity.quota', error: null,
+    }];
+  }
   return [{
     id: 'antigravity-plan', agent: 'antigravity', title: null, plan,
-    usedPct: null,                       // % de uso é inviável (Google não expõe)
+    usedPct: null,                         // com quota → sem número (só rótulo)
     resetAt: null, resetInMin: null, extra: null,
     source: 'antigravity.settings', error: null,
   }];
+}
+
+// Lista os .db de conversa do Antigravity (I/O default; testes injetam o seu).
+function defaultListAntigravityDbs(base) {
+  const dir = path.join(base, 'conversations');
+  try { return fs.readdirSync(dir).filter((f) => f.endsWith('.db')).map((f) => path.join(dir, f)); }
+  catch { return []; }
 }
 
 // Faz um GET HTTPS injetando um `fetcher` (testável). Em produção usa https.get.
@@ -676,7 +732,7 @@ function parseEnviron(raw, keys) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits, parseAntigravityTier,
+  parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits, parseAntigravityTier, parseAntigravityQuota,
   readClaudeUsage, readGlmUsage, readCodexUsage, readAntigravityUsage, collectUsage, parseEnviron,
   findCodexRollout, lastCodexRateLimits, mergeUsage, isSummaryEntry,
   USAGE_STALE_MS, USAGE_DROP_MS,

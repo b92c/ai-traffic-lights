@@ -6,9 +6,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits, parseAntigravityTier,
+  parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits,
+  parseAntigravityTier, parseAntigravityQuota,
   lastCodexRateLimits, readClaudeUsage, readGlmUsage, readCodexUsage, readAntigravityUsage,
-  collectUsage, parseEnviron, mergeUsage, _clearGlmCache, _clearClaudeCache, _clearCodexCache, _clearAntigravityCache,
+  collectUsage, parseEnviron, mergeUsage, _clearGlmCache, _clearClaudeCache, _clearCodexCache,
 } = require('../src/usage');
 
 // now fixo = 2026-07-07T12:00:00Z → testes determinísticos (mês é 0-indexed em JS: 6=Jul).
@@ -577,4 +578,50 @@ test('readAntigravityUsage: settings sem modelo → rótulo "Antigravity" simple
 test('readAntigravityUsage: readFile lança (sem arquivo) → null', () => {
   const r = readAntigravityUsage({ home: '/x', readFile: () => { throw new Error('ENOENT'); } });
   assert.equal(r, null);
+});
+
+// =========================== Antigravity — quota esgotada (DBs de conversa) ===========================
+
+test('parseAntigravityQuota: pega o MAIOR quotaResetTimeStamp futuro', () => {
+  const txt = 'lixo\0QUOTA_EXHAUSTED",...,"quotaResetTimeStamp":"2026-07-10T00:00:00Z"...'
+    + '\0mais\0QUOTA_EXHAUSTED","quotaResetTimeStamp":"2026-07-14T19:56:12Z"...';
+  const q = parseAntigravityQuota(txt, NOW);
+  assert.deepEqual(q, { resetAt: '2026-07-14T19:56:12Z' }); // o mais distante
+});
+
+test('parseAntigravityQuota: reset no passado → null (não está esgotada agora)', () => {
+  const txt = 'QUOTA_EXHAUSTED","quotaResetTimeStamp":"2026-07-01T00:00:00Z"';
+  assert.equal(parseAntigravityQuota(txt, NOW), null);
+  assert.equal(parseAntigravityQuota('sem quota aqui', NOW), null);
+  assert.equal(parseAntigravityQuota(null, NOW), null);
+});
+
+test('readAntigravityUsage: quota esgotada → usedPct 100 + reset (DB injetado)', () => {
+  const r = readAntigravityUsage({
+    home: '/x', now: NOW,
+    readFile: () => JSON.stringify({ model: 'gpt-oss-120b-medium' }),
+    listDbs: () => ['/db/a.db', '/db/b.db'],
+    mtime: (f) => (f === '/db/b.db' ? 200 : 100), // b é mais novo
+    readDb: (f) => (f === '/db/b.db'
+      ? 'QUOTA_EXHAUSTED","quotaResetTimeStamp":"2026-07-14T19:56:12Z"'
+      : 'sem quota'),
+  });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].id, 'antigravity-quota');
+  assert.equal(r[0].usedPct, 100);            // esgotado → barra cheia
+  assert.equal(r[0].resetAt, '2026-07-14T19:56:12Z');
+  assert.equal(r[0].source, 'antigravity.quota');
+  assert.equal(r[0].plan, 'Antigravity (gpt-oss-120b-medium)');
+});
+
+test('readAntigravityUsage: com quota (nenhum QUOTA_EXHAUSTED futuro) → só rótulo', () => {
+  const r = readAntigravityUsage({
+    home: '/x', now: NOW,
+    readFile: () => JSON.stringify({ model: 'm' }),
+    listDbs: () => ['/db/a.db'],
+    mtime: () => 1,
+    readDb: () => 'conversa normal sem erro de quota',
+  });
+  assert.equal(r[0].id, 'antigravity-plan');
+  assert.equal(r[0].usedPct, null);
 });
