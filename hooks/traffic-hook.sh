@@ -4,10 +4,12 @@
 # Serve DOIS agentes (payloads de hook quase idênticos — session_id,
 # hook_event_name, cwd, tool_name via stdin):
 #   Claude Code  → instalado em ~/.claude/settings.json  (AI_TL_AGENT ausente)
+#   Antigravity CLI → instalado em ~/.gemini/antigravity-cli/settings.json (AI_TL_AGENT=antigravity)
 #   Gemini CLI   → instalado em ~/.gemini/settings.json  (AI_TL_AGENT=gemini)
 # Eventos do Gemini são traduzidos pro vocabulário canônico do contrato
 # (BeforeAgent→UserPromptSubmit, BeforeTool→PreToolUse, AfterTool→PostToolUse,
-# AfterAgent→Stop) — o renderer nunca precisa conhecer dialetos.
+# AfterAgent→Stop) — o renderer nunca precisa conhecer dialetos. Antigravity usa os
+# mesmos eventos do Claude Code nativamente.
 #
 # Filosofia (revisão v5): este hook SÓ REGISTRA EVENTOS (append-only).
 # NÃO computa o estado do semáforo — isso fica no renderer (computeState),
@@ -58,6 +60,14 @@ main() {
       AfterTool)   evt="PostToolUse" ;;
       AfterAgent)  evt="Stop" ;;
     esac
+  elif [ "$AGENT" = "antigravity" ]; then
+    case "$evt" in
+      PreInvocation)  evt="UserPromptSubmit" ;;
+      PreToolUse)     evt="PreToolUse" ;;
+      PostToolUse)    evt="PostToolUse" ;;
+      PostInvocation) evt="Stop" ;;
+      Stop)           evt="Stop" ;;
+    esac
   fi
 
   # SessionEnd: sessão encerrou limpo — remove o state file (não vira zombie).
@@ -88,14 +98,14 @@ main() {
   fi
 
   # Sobe a árvore até achar o processo do agente. Zero forks.
-  # claude: binário próprio (comm=claude). gemini: script Node (comm=node) —
-  # o PRIMEIRO ancestral node é o gemini. codex: binário Rust (comm=codex).
+  # claude: binário próprio (comm=claude). antigravity/gemini: script Node (comm=node) ou binário agy/antigravity —
+  # o PRIMEIRO ancestral é o agente. codex: binário Rust (comm=codex).
   local agent_pid=$$ pid=$$ comm="" ppid=""
   while [ "${pid:-0}" -gt 1 ] 2>/dev/null; do
     comm=""
     read -r comm < "/proc/$pid/comm" 2>/dev/null
     case "$AGENT:$comm" in
-      claude:claude|claude:claude-agent-acp|gemini:node|codex:codex) agent_pid="$pid"; break ;;
+      claude:claude|claude:claude-agent-acp|gemini:node|antigravity:node|antigravity:agy|antigravity:antigravity|codex:codex) agent_pid="$pid"; break ;;
     esac
     ppid=""
     while IFS=$' \t' read -r k v; do

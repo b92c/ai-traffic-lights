@@ -8,7 +8,7 @@ Overlay translúcido sempre no topo (Electron) que mostra o estado de cada
 sessão de **agente de IA em terminal** no seu desktop como um semáforo:
 🟢 pronto · 🟡 trabalhando · 🔴 precisa de você.
 
-Monitora **Claude Code**, **Gemini CLI**, **Codex** e **OpenCode** hoje. A
+Monitora **Claude Code**, **Antigravity**, **Codex** e **OpenCode** hoje. A
 arquitetura é agnóstica — agentes novos entram via adapters (ver
 [Adicionando um agente](#adicionando-um-novo-agente)).
 
@@ -29,7 +29,7 @@ por sessão, clique para pular pro terminal — **janela _e_ aba**.
 ## Funcionalidades
 
 - 🟢🟡🔴 Uma luz por sessão + luz agregada no cabeçalho
-- 🤖 **Quatro agentes, um overlay**: Claude Code, Gemini CLI, Codex e OpenCode
+- 🤖 **Quatro agentes, um overlay**: Claude Code, Antigravity, Codex e OpenCode
 - 🌐 Interface em inglês e português — segue o idioma do sistema, com troca
   nas Preferências
 - **Click-to-focus**: pula pro terminal da sessão — a janela exata e, no Warp,
@@ -40,7 +40,7 @@ por sessão, clique para pular pro terminal — **janela _e_ aba**.
 - 🔔 **Snooze de alerta** por sessão (silencia o apito por 1h numa sessão vermelha)
 - 🔝 Sessões **ordenadas por urgência** (vermelho → amarelo → verde); **ícone do
   tray dinâmico** pinta com a pior cor e mostra a contagem no hover
-- 🚀 **Quick Launcher**: inicia um agente (+ Claude / + Gemini / + Codex / +
+- 🚀 **Quick Launcher**: inicia um agente (+ Claude / + Antigravity / + Codex / +
   OpenCode) pelo empty state do overlay ou pelo tray — abre o terminal no
   último projeto e a sessão acende sozinha
 - ✏️ Duplo-clique renomeia a sessão (apelidos persistem por projeto)
@@ -74,7 +74,7 @@ por sessão, clique para pular pro terminal — **janela _e_ aba**.
 - `wmctrl`, `xdotool`, `jq` — `sudo apt install wmctrl xdotool jq`
 - Node.js 20+
 - Um agente suportado: [Claude Code](https://claude.com/claude-code),
-  [Gemini CLI](https://github.com/google-gemini/gemini-cli),
+  [Antigravity CLI](https://antigravity.google/docs/cli/reference),
   [Codex](https://github.com/openai/codex) ou [OpenCode](https://opencode.ai)
 
 ## Instalação (do fonte)
@@ -84,7 +84,7 @@ git clone https://github.com/aronpc/ai-traffic-lights.git
 cd ai-traffic-lights
 npm install
 npm run setup-hook   # registra os adapters: Claude Code (~/.claude),
-                     # Gemini CLI (~/.gemini) e OpenCode (plugin em
+                     # Antigravity CLI (~/.gemini/antigravity-cli) e OpenCode (plugin em
                      # ~/.config/opencode/plugin/), conforme presentes
 npm start            # abre o overlay
 ```
@@ -193,13 +193,11 @@ Dois passos — o app se adapta ao que você declarar:
    sessões vivas que ainda não têm state file).
 2. **Escreva um adapter**: qualquer coisa que grave state files seguindo o
    contrato acima. O [`hooks/traffic-hook.sh`](hooks/traffic-hook.sh) é a
-   implementação de referência — e já serve **dois** agentes: para o Gemini
-   CLI ele roda com `AI_TL_AGENT=gemini` e traduz o dialeto de eventos
-   (`BeforeAgent`→`UserPromptSubmit`, `BeforeTool`→`PreToolUse`,
-   `AfterTool`→`PostToolUse`, `AfterAgent`→`Stop`) pro vocabulário canônico —
+   implementação de referência — e já serve **dois** agentes: para o Antigravity
+   CLI ele roda com `AI_TL_AGENT=antigravity` e usa o vocabulário canônico diretamente —
    o renderer nunca aprende dialetos por agente.
 
-Para CLIs Node cujo `comm` de processo é só `node` (Gemini), a sonda `/proc`
+Para CLIs Node cujo `comm` de processo é só `node` (Antigravity), a sonda `/proc`
 identifica sessões pelo basename do script no argv — declarado via campo
 `argv` no registro.
 
@@ -238,7 +236,7 @@ cat "${XDG_DATA_HOME:-$HOME/.local/share}/ai-traffic-lights/state/t.json" | jq .
 
 ## Roadmap
 
-- [x] Adapter do Gemini CLI (hooks) + detecção de idle via sonda argv
+- [x] Adapter do Antigravity CLI (hooks) + detecção de idle via sonda argv
 - [x] Adapter do OpenCode (plugin: eventos chat/tool/idle/permission, captura
   de modelo — ver `adapters/opencode/`)
 - [x] Adapter do Codex (mesmo schema de hooks do Claude; model do payload) —

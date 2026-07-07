@@ -258,6 +258,32 @@ async function readClaudeUsage({ home, now, fetcher } = {}) {
 }
 function _clearClaudeCache() { _claudeCacheByToken.clear(); }
 
+// ---- Antigravity CLI — PASSIVO, sem rede ----
+// Lê o modelo/plano atual de ~/.gemini/antigravity-cli/settings.json
+function readAntigravityUsage({ home } = {}) {
+  try {
+    const os = require('os');
+    const settingsPath = path.join(home || os.homedir(), '.gemini', 'antigravity-cli', 'settings.json');
+    if (!fs.existsSync(settingsPath)) return null;
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    const model = settings.model || 'Gemini 2.5 Flash';
+    return [{
+      id: 'antigravity-plan',
+      agent: 'antigravity',
+      plan: 'Antigravity (' + model + ')',
+      title: null,
+      usedPct: null,
+      resetAt: null,
+      resetInMin: null,
+      extra: null,
+      source: 'antigravity.settings',
+      error: null,
+    }];
+  } catch {
+    return null;
+  }
+}
+
 // ---- Codex (OpenAI, plano ChatGPT) — PASSIVO, sem rede ----
 // O uso vive no rollout da sessão: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl.
 // O ÚLTIMO evento token_count tem payload.rate_limits (% e reset reais das
@@ -382,6 +408,42 @@ function defaultReadHead(f) {
 }
 function defaultReadFull(f) { return fs.readFileSync(f, 'utf8'); }
 
+// ---- Antigravity / Gemini CLI (Google Code Assist) — só RÓTULO ----
+// PASSIVO, sem rede: o modelo ativo fica em ~/.gemini/antigravity-cli/settings.json
+// ("model": "..."). É só um rótulo — o % de uso é INVIÁVEL de obter (o Google
+// não expõe consumo; o endpoint loadCodeAssist só devolve o tier do plano, e o
+// CLI conta requisições em RAM). Então mostramos "Antigravity (<modelo>)" com
+// usedPct sempre null — igual ao fallback plano-só do Claude sem token.
+// Síncrona (não faz rede) → collectUsage a envolve num Promise.resolve.
+
+// Parser puro: extrai o rótulo do objeto settings já lido. Testável.
+function parseAntigravityTier(settings) {
+  if (!settings || typeof settings !== 'object') return null;
+  const model = settings.model || settings.selectedModel || settings.defaultModel;
+  if (!model || typeof model !== 'string') return { model: null };
+  return { model };
+}
+
+// Lê o rótulo do Antigravity de ~/.gemini/antigravity-cli/settings.json. Sem
+// arquivo → null (omitido). Nunca lança. `readFile` injetável pra teste.
+function readAntigravityUsage({ home, readFile } = {}) {
+  const file = path.join(home || process.env.HOME, '.gemini', 'antigravity-cli', 'settings.json');
+  let settings;
+  try {
+    const raw = (readFile || ((f) => fs.readFileSync(f, 'utf8')))(file);
+    settings = JSON.parse(raw);
+  } catch { return null; } // sem Antigravity configurado
+  const t = parseAntigravityTier(settings);
+  if (!t) return null;
+  const plan = t.model ? 'Antigravity (' + t.model + ')' : 'Antigravity';
+  return [{
+    id: 'antigravity-plan', agent: 'antigravity', title: null, plan,
+    usedPct: null,                       // % de uso é inviável (Google não expõe)
+    resetAt: null, resetInMin: null, extra: null,
+    source: 'antigravity.settings', error: null,
+  }];
+}
+
 // Faz um GET HTTPS injetando um `fetcher` (testável). Em produção usa https.get.
 // Devolve o JSON parseado ou lança (quem chama captura).
 function _httpsGetJson(url, headers, fetcher, timeoutMs = 4000) {
@@ -492,8 +554,9 @@ async function collectUsage(opts = {}) {
   // Claude (OAuth) + todas as contas GLM em paralelo — I/O de rede independente.
   // Claude usa opts.claudeFetcher (separado do de GLM: cada API tem schema/mock
   // próprio; em teste sem claudeFetcher e sem token, o Claude cai no plano-só).
-  const [claude, ...glm] = await Promise.all([
+  const [claude, antigravity, ...glm] = await Promise.all([
     readClaudeUsage({ home: opts.home, now: opts.now, fetcher: opts.claudeFetcher }).catch(() => null),
+    Promise.resolve().then(() => readAntigravityUsage({ home: opts.home })).catch(() => null),
     ...creds.map((c) => readGlmUsage({
       env: c.env, now: opts.now, fetcher: opts.fetcher,
       label: multi ? c.label : undefined,
@@ -501,6 +564,7 @@ async function collectUsage(opts = {}) {
     }).catch(() => null)),                      // readGlmUsage já captura; dupla defesa
   ]);
   if (Array.isArray(claude)) out.push(...claude);
+  if (Array.isArray(antigravity)) out.push(...antigravity);
 
   // Codex (passivo, sem rede): uma leitura por cwd distinto de sessão Codex viva.
   // opts.codexCwds = ['/home/x/proj', ...] (main.js coleta de /proc/<pid>/cwd).
@@ -537,7 +601,7 @@ const USAGE_DROP_MS = 20 * 60 * 1000;   // ~20 min → remove
 function isSummaryEntry(e) {
   if (!e || !e.id) return false;
   const id = String(e.id);
-  return id === 'claude-plan' || id === 'glm' || id.startsWith('glm:');
+  return id === 'claude-plan' || id === 'antigravity-plan' || id === 'glm' || id.startsWith('glm:');
 }
 
 // Funde a coleta nova (fresh) com o estado anterior (prev), por `id`. Resolve o
@@ -612,8 +676,8 @@ function parseEnviron(raw, keys) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits,
-  readClaudeUsage, readGlmUsage, readCodexUsage, collectUsage, parseEnviron,
+  parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits, parseAntigravityTier,
+  readClaudeUsage, readGlmUsage, readCodexUsage, readAntigravityUsage, collectUsage, parseEnviron,
   findCodexRollout, lastCodexRateLimits, mergeUsage, isSummaryEntry,
   USAGE_STALE_MS, USAGE_DROP_MS,
   _clearGlmCache, _clearClaudeCache, _clearCodexCache, _httpsGetJson, CLAUDE_TIER_LABEL,

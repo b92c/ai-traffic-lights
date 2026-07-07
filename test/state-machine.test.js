@@ -131,7 +131,7 @@ test('iconFor: cada reason tem seu ícone; fallback por level', () => {
 
 test('agentOf: resolve agente conhecido, cai no default (claude) senão', () => {
   assert.equal(agentOf({ agent: 'claude' }), 'claude');
-  assert.equal(agentOf({ agent: 'gemini' }), 'gemini');
+  assert.equal(agentOf({ agent: 'antigravity' }), 'antigravity');
   assert.equal(agentOf({ agent: 'opencode' }), 'opencode');
   assert.equal(agentOf({ agent: 'inexistente' }), 'claude', 'agente fora do registro → default');
   assert.equal(agentOf({}), 'claude', 'sem campo agent (state v1) → default');

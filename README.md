@@ -8,7 +8,7 @@ A translucent always-on-top overlay (Electron) that shows the state of every
 **terminal AI agent session** on your desktop as a traffic light: 🟢 done ·
 🟡 working · 🔴 needs you.
 
-Monitors **Claude Code**, **Gemini CLI**, **Codex** and **OpenCode** today. The
+Monitors **Claude Code**, **Antigravity**, **Codex** and **OpenCode** today. The
 architecture is agent-agnostic — new agents land via adapters (see
 [Adding an agent](#adding-a-new-agent)).
 
@@ -30,7 +30,7 @@ terminal — **window _and_ tab**.
 ## Features
 
 - 🟢🟡🔴 One light per session, plus an aggregate light in the header
-- 🤖 **Four agents, one overlay**: Claude Code, Gemini CLI, Codex and OpenCode
+- 🤖 **Four agents, one overlay**: Claude Code, Antigravity, Codex and OpenCode
 - 🌐 UI in English & Portuguese — follows the system locale, switchable in
   Preferences
 - **Click-to-focus**: jumps to the session's terminal — the exact window, and
@@ -41,7 +41,7 @@ terminal — **window _and_ tab**.
 - 🔔 Per-session **alert snooze** (mute the beep for 1h on a red session)
 - 🔝 Sessions **sort by urgency** (red → yellow → green); **dynamic tray icon**
   paints with the worst color and shows counts on hover
-- 🚀 **Quick Launcher**: start an agent (+ Claude / + Gemini / + Codex / +
+- 🚀 **Quick Launcher**: start an agent (+ Claude / + Antigravity / + Codex / +
   OpenCode) from the overlay empty-state or the tray — opens the terminal in
   the last project and the session lights up automatically
 - ✏️ Double-click to rename a session (aliases persist per project)
@@ -74,7 +74,7 @@ terminal — **window _and_ tab**.
 - `wmctrl`, `xdotool`, `jq` — `sudo apt install wmctrl xdotool jq`
 - Node.js 20+
 - A supported agent: [Claude Code](https://claude.com/claude-code),
-  [Gemini CLI](https://github.com/google-gemini/gemini-cli),
+  [Antigravity CLI](https://antigravity.google/docs/cli/reference),
   [Codex](https://github.com/openai/codex) or [OpenCode](https://opencode.ai)
 
 ## Install (from source)
@@ -84,7 +84,7 @@ git clone https://github.com/aronpc/ai-traffic-lights.git
 cd ai-traffic-lights
 npm install
 npm run setup-hook   # registers the adapters: Claude Code (~/.claude),
-                     # Gemini CLI (~/.gemini) and OpenCode (plugin in
+                     # Antigravity CLI (~/.gemini/antigravity-cli) and OpenCode (plugin in
                      # ~/.config/opencode/plugin/), whichever are present
 npm start            # opens the overlay
 ```
@@ -196,12 +196,10 @@ Two steps — the app adapts to whatever you declare:
 2. **Write an adapter**: anything that writes state files following the
    contract above. [`hooks/traffic-hook.sh`](hooks/traffic-hook.sh) is the
    reference implementation — and it already serves **two** agents: for
-   Gemini CLI it runs with `AI_TL_AGENT=gemini` and translates the event
-   dialect (`BeforeAgent`→`UserPromptSubmit`, `BeforeTool`→`PreToolUse`,
-   `AfterTool`→`PostToolUse`, `AfterAgent`→`Stop`) into the canonical
-   vocabulary, so the renderer never learns per-agent dialects.
+   Antigravity CLI it runs with `AI_TL_AGENT=antigravity` and uses the
+   canonical event vocabulary directly, so the renderer never learns per-agent dialects.
 
-For Node-based CLIs whose process `comm` is just `node` (Gemini), the
+For Node-based CLIs whose process `comm` is just `node` (Antigravity), the
 `/proc` probe identifies sessions by the script basename in the process
 argv — declared via the `argv` field in the registry.
 
@@ -240,7 +238,7 @@ cat "${XDG_DATA_HOME:-$HOME/.local/share}/ai-traffic-lights/state/t.json" | jq .
 
 ## Roadmap
 
-- [x] Gemini CLI adapter (hooks) + idle detection via argv probe
+- [x] Antigravity CLI adapter (hooks) + idle detection via argv probe
 - [x] OpenCode adapter (plugin: chat/tool/idle/permission events, model
   capture — see `adapters/opencode/`)
 - [x] Codex adapter (same hooks schema as Claude; model from payload) — note:

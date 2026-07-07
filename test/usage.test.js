@@ -6,9 +6,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits,
-  lastCodexRateLimits, readClaudeUsage, readGlmUsage, readCodexUsage,
-  collectUsage, parseEnviron, mergeUsage, _clearGlmCache, _clearClaudeCache, _clearCodexCache,
+  parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits, parseAntigravityTier,
+  lastCodexRateLimits, readClaudeUsage, readGlmUsage, readCodexUsage, readAntigravityUsage,
+  collectUsage, parseEnviron, mergeUsage, _clearGlmCache, _clearClaudeCache, _clearCodexCache, _clearAntigravityCache,
 } = require('../src/usage');
 
 // now fixo = 2026-07-07T12:00:00Z → testes determinísticos (mês é 0-indexed em JS: 6=Jul).
@@ -514,4 +514,67 @@ test('mergeUsage: summary sozinho (sem concreto) se mantém (1ª aparição hone
   const m = mergeUsage([], [CLAUDE_PLAN], NOW);
   assert.equal(m.length, 1);
   assert.equal(m[0].id, 'claude-plan');
+});
+
+// =========================== readAntigravityUsage ===========================
+
+test('readAntigravityUsage: extrai modelo do settings.json do Antigravity', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-tl-test-antigravity-'));
+  const configDir = path.join(tmpHome, '.gemini', 'antigravity-cli');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'settings.json'), JSON.stringify({ model: 'gemini-2.5-pro' }));
+
+  try {
+    const r = readAntigravityUsage({ home: tmpHome });
+    assert.equal(r.length, 1);
+    assert.equal(r[0].id, 'antigravity-plan');
+    assert.equal(r[0].agent, 'antigravity');
+    assert.equal(r[0].plan, 'Antigravity (gemini-2.5-pro)');
+    assert.equal(r[0].source, 'antigravity.settings');
+  } finally {
+    try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch {}
+  }
+});
+
+test('readAntigravityUsage: sem settings.json → retorna null', () => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ai-tl-test-antigravity-missing-'));
+  try {
+    const r = readAntigravityUsage({ home: tmpHome });
+    assert.equal(r, null);
+  } finally {
+    try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch {}
+  }
+});
+
+
+// =========================== Antigravity (settings.json) ===========================
+
+test('parseAntigravityTier: extrai o modelo ativo de settings', () => {
+  assert.deepEqual(parseAntigravityTier({ model: 'GPT-OSS 120B (Medium)' }), { model: 'GPT-OSS 120B (Medium)' });
+  assert.deepEqual(parseAntigravityTier({ selectedModel: 'gemini-2.5-pro' }), { model: 'gemini-2.5-pro' });
+});
+
+test('parseAntigravityTier: sem modelo → {model:null}; não-objeto → null', () => {
+  assert.deepEqual(parseAntigravityTier({ colorScheme: 'dark' }), { model: null });
+  assert.equal(parseAntigravityTier(null), null);
+});
+
+test('readAntigravityUsage: readFile injetado → linha com o modelo (sem %)', () => {
+  const r = readAntigravityUsage({ home: '/x', readFile: () => JSON.stringify({ model: 'GPT-OSS 120B (Medium)' }) });
+  assert.equal(r.length, 1);
+  assert.equal(r[0].id, 'antigravity-plan');
+  assert.equal(r[0].agent, 'antigravity');
+  assert.equal(r[0].plan, 'Antigravity (GPT-OSS 120B (Medium))');
+  assert.equal(r[0].usedPct, null);           // % inviável
+  assert.equal(r[0].source, 'antigravity.settings');
+});
+
+test('readAntigravityUsage: settings sem modelo → rótulo "Antigravity" simples', () => {
+  const r = readAntigravityUsage({ home: '/x', readFile: () => JSON.stringify({ colorScheme: 'dark' }) });
+  assert.equal(r[0].plan, 'Antigravity');
+});
+
+test('readAntigravityUsage: readFile lança (sem arquivo) → null', () => {
+  const r = readAntigravityUsage({ home: '/x', readFile: () => { throw new Error('ENOENT'); } });
+  assert.equal(r, null);
 });

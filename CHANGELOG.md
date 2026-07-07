@@ -39,7 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Codex** (ChatGPT plan) shows real 5-hour and 7-day % + reset, read
     **passively** from the session's rollout (`~/.codex/sessions/**/rollout-*.jsonl`,
     last `token_count` event → `rate_limits`). No network — matched to the live
-    session by cwd (`/proc/<pid>/cwd`). Gemini stays out (no persisted usage).
+    session by cwd (`/proc/<pid>/cwd`).
+  - **Antigravity** (Gemini CLI) shows a label-only row `Antigravity (<model>)`
+    read passively from `~/.gemini/antigravity-cli/settings.json` — Google
+    doesn't expose consumption, so there's no % (like Claude's plan-only
+    fallback).
     New `src/usage.js` (pure parsers + I/O, unit tested); collectors run on a
     60s cadence decoupled from the 5s session loop; responses cached 30s and
     never throw.

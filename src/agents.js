@@ -17,15 +17,9 @@ const AGENTS = {
   claude: { label: 'Claude', comm: ['claude', 'claude-agent-acp'], bin: 'claude', color: '#D97757',
             mark: '<path d="M12 2 L13.8 10.2 L22 12 L13.8 13.8 L12 22 L10.2 13.8 L2 12 L10.2 10.2 Z"/>',
             adapter: 'hooks/traffic-hook.sh' },
-  // gemini-cli é script Node (#!/usr/bin/env node) e NÃO seta process.title:
-  // /proc/comm = "node" (verificado empiricamente) — comm vazio de propósito,
-  // senão a sonda casaria com QUALQUER processo Node (falso positivo).
-  // A sonda identifica pelo argv (basename do script em /proc/<pid>/cmdline).
-  // Adapter: o MESMO traffic-hook.sh com AI_TL_AGENT=gemini (o hook traduz
-  // BeforeAgent/BeforeTool/AfterTool/AfterAgent pro vocabulário canônico).
-  gemini:   { label: 'Gemini',   comm: [], argv: ['gemini'], bin: 'gemini', color: '#4285F4',
-              mark: '<path d="M12 3 L21 12 L12 21 L3 12 Z"/>',
-              adapter: 'hooks/traffic-hook.sh (AI_TL_AGENT=gemini)' },
+  antigravity: { label: 'Antigravity', comm: ['agy', 'antigravity'], argv: ['agy', 'antigravity'], bin: 'agy', color: '#1B73E8',
+                 mark: '<path d="M12 4L4 12h5v8h6v-8h5L12 4z"/>',
+                 adapter: 'hooks/traffic-hook.sh (AI_TL_AGENT=antigravity)' },
   // codex-cli é Node (#!/usr/bin/env node) → comm="node" (verificado);
   // detectado pelo basename do script no argv, como o Gemini. Sem adapter
   // por enquanto — sessões aparecem como "ativo" (presença via /proc).

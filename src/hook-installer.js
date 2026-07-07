@@ -35,16 +35,12 @@ const TARGETS = {
     // schema do Claude: {type, command} — sem campo name
     entry: (cmd) => ({ type: 'command', command: cmd }),
   },
-  gemini: {
-    label: 'Gemini CLI',
-    settings: path.join(os.homedir(), '.gemini', 'settings.json'),
-    detectDir: path.join(os.homedir(), '.gemini'),
-    // BeforeModel/BeforeToolSelection ficam de fora de propósito: disparam
-    // várias vezes por turno e não mudam a cor — só custariam forks.
-    events: ['BeforeAgent', 'BeforeTool', 'AfterTool', 'AfterAgent'],
-    command: (dest) => `AI_TL_AGENT=gemini bash ${shellQuote(dest)}`,
-    // schema do Gemini aceita name — aparece nos logs/CLI dele
-    entry: (cmd) => ({ name: 'ai-traffic-lights', type: 'command', command: cmd }),
+  antigravity: {
+    label: 'Antigravity CLI',
+    settings: path.join(os.homedir(), '.gemini', 'config', 'hooks.json'),
+    detectDir: path.join(os.homedir(), '.gemini', 'config'),
+    events: ['PreInvocation', 'PreToolUse', 'PostToolUse', 'PostInvocation', 'Stop'],
+    command: (dest) => `AI_TL_AGENT=antigravity bash ${shellQuote(dest)}`,
   },
   codex: {
     // Codex usa o MESMO schema de hooks do Claude (hooks.json em JSON, mesmos
@@ -124,9 +120,53 @@ function backupAndWrite(settingsPath, settings) {
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
 }
 
+function installAntigravityHooks(target, hookDest) {
+  const settings = load(target.settings);
+  const hookCmd = target.command(hookDest);
+  settings['ai-traffic-lights'] = settings['ai-traffic-lights'] || {};
+  const hookGroup = settings['ai-traffic-lights'];
+  let added = 0, updated = 0;
+  for (const evt of target.events) {
+    hookGroup[evt] = hookGroup[evt] || [];
+    let found = hookGroup[evt].find(h => h && h.type === 'command' && String(h.command).includes(HOOK_MARKER));
+    if (found) {
+      if (found.command !== hookCmd) { found.command = hookCmd; updated++; }
+    } else {
+      hookGroup[evt].push({ type: 'command', command: hookCmd });
+      added++;
+    }
+  }
+  const wrote = added > 0 || updated > 0;
+  if (wrote) backupAndWrite(target.settings, settings);
+  return { added, updated, wrote, skipped: [] };
+}
+
+function removeAntigravityHooks(target) {
+  const settings = load(target.settings);
+  if (!settings['ai-traffic-lights']) return { removed: 0, wrote: false };
+  let removed = 0;
+  const hookGroup = settings['ai-traffic-lights'];
+  for (const evt of Object.keys(hookGroup)) {
+    if (!Array.isArray(hookGroup[evt])) continue;
+    const before = hookGroup[evt].length;
+    hookGroup[evt] = hookGroup[evt].filter(h => !(h && h.type === 'command' && String(h.command).includes(HOOK_MARKER)));
+    removed += before - hookGroup[evt].length;
+    if (hookGroup[evt].length === 0) delete hookGroup[evt];
+  }
+  if (Object.keys(hookGroup).length === 0) {
+    delete settings['ai-traffic-lights'];
+  }
+  const wrote = removed > 0;
+  if (wrote) backupAndWrite(target.settings, settings);
+  return { removed, wrote };
+}
+
 // Instala/atualiza o comando nos eventos do alvo. Retorna {added, updated, wrote}.
 function install(targetId, hookDest) {
   const target = TARGETS[targetId];
+  if (targetId === 'antigravity') {
+    return installAntigravityHooks(target, hookDest);
+  }
   const hookCmd = target.command(hookDest);
   const settings = load(target.settings);
   settings.hooks = settings.hooks || {};
@@ -166,6 +206,9 @@ function install(targetId, hookDest) {
 // Remove todas as entradas nossas do alvo. Retorna {removed, wrote}.
 function remove(targetId) {
   const target = TARGETS[targetId];
+  if (targetId === 'antigravity') {
+    return removeAntigravityHooks(target);
+  }
   const settings = load(target.settings);
   if (!settings.hooks) return { removed: 0, wrote: false };
   let removed = 0;
