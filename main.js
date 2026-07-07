@@ -681,18 +681,20 @@ function saveSettingsBounds() {
     } catch {}
   }, 300);
 }
-// Mínimos que comportam a aba mais alta (Geral: 7 controles) + a barra de abas
-// + as ações, sem rolagem — o WM não deixa encolher além disso, o layout nunca
-// quebra. Bem menor que antes: com abas, só uma seção aparece por vez.
-const SETTINGS_MIN_W = 400, SETTINGS_MIN_H = 640;
+// Tamanho FIXO da janela de Preferências (não redimensionável): travado na
+// altura da aba mais alta (Geral), medido no conteúdo real a 420px de largura.
+// As abas mais curtas (Integração) ficam com espaço vazio; nenhuma rola.
+// useContentSize faz width/height valerem para a ÁREA WEB (o .prefs preenche).
+const SETTINGS_W = 420, SETTINGS_H = 845;
 function createSettingsWindow() {
   if (settingsWin && !settingsWin.isDestroyed()) { settingsWin.show(); settingsWin.focus(); return; }
   const b = loadSettingsBounds() || {};
   settingsWin = new BrowserWindow({
-    width: Math.max(b.width || 420, SETTINGS_MIN_W),          // bounds salvos por versões
-    height: Math.max(b.height || SETTINGS_MIN_H, SETTINGS_MIN_H), // antigas sobem pro mínimo
-    minWidth: SETTINGS_MIN_W, minHeight: SETTINGS_MIN_H, resizable: true,
-    x: typeof b.x === 'number' ? b.x : undefined,
+    width: SETTINGS_W, height: SETTINGS_H,
+    useContentSize: true,               // width/height = área web (o .prefs preenche)
+    resizable: false,                   // tamanho travado na maior aba (pedido do usuário)
+    maximizable: false, fullscreenable: false,
+    x: typeof b.x === 'number' ? b.x : undefined,   // posição é lembrada; tamanho não
     y: typeof b.y === 'number' ? b.y : undefined,
     title: T('prefs_title'),
     icon: path.join(__dirname, 'assets/tray-icon.png'),
@@ -711,8 +713,7 @@ function createSettingsWindow() {
   // Mesmo nível + criada depois = fica na frente.
   settingsWin.setAlwaysOnTop(true, 'screen-saver');
   settingsWin.loadFile(path.join(__dirname, 'src/settings.html'));
-  settingsWin.on('resize', saveSettingsBounds);
-  settingsWin.on('move', saveSettingsBounds);
+  settingsWin.on('move', saveSettingsBounds);          // só posição (tamanho é fixo)
   settingsWin.on('closed', () => { settingsWin = null; });
 }
 
