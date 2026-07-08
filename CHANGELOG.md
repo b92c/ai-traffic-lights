@@ -8,11 +8,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Self-update from the UI (AppImage).** The overlay now checks for new
+  releases periodically (on launch + every 1h) and, for AppImage installs,
+  downloads and applies the update in place — a `↓ vX` button downloads with a
+  live progress %, then a `↻ vX` button restarts into the new version. Wired
+  via `electron-updater` with `publish` set to GitHub. `.deb` / `npm` / `source`
+  installs keep the existing "open the release in the browser" flow, since
+  `electron-updater` only auto-updates AppImage on Linux. A **"Check for
+  updates"** tray item (and clicking the version in the header) runs an on-demand
+  check that also posts a desktop notification with the result (new version / up
+  to date / error). (Requires future releases to ship `dist/latest.yml` + the
+  `.AppImage` as release assets.)
+
 ### Changed
-### Deprecated
-### Removed
+- **Reset clock now reads as a countdown.** The footer's quota-reset indicator
+  shows `Xmin` under 1h, `HH:MM` within 24h (the wall-clock reset time), and
+  `Xd` beyond — instead of the old `HH:MM` / `1d HHh` / `Nd`, which buried the
+  "resetting soon" case behind an absolute clock.
+- **Bumped Electron 31 → 43** (devDependency).
+- **Resize grip now rounds with the window corner.** The bottom-right resize
+  handle was a sharp square `L`; it's now a curved arc that echoes the panel's
+  `border-radius`, so it reads as part of the rounded corner.
+
 ### Fixed
-### Security
+- **Overlay window no longer opens off-screen after a display change.** A saved
+  position could land outside the active work area when an external monitor was
+  disconnected and the layout shrank, leaving the overlay invisible or
+  repositioned by the WM. `createWindow` now clamps any persisted bounds back
+  to the primary display's corner when they fall outside all known displays.
+- **Renderer crash on `/dev/shm` under Ubuntu 24.04 (companion to v0.4.1).**
+  Even with `--no-sandbox`, the packaged app still couldn't allocate shared
+  memory on this host: Chromium's default `/dev/shm` path failed with `ESRCH`,
+  so only the tray opened and no window drew. `main.js` now also passes
+  `--disable-dev-shm-usage` so Chromium falls back to `/tmp`.
+- **Antigravity quota no longer false-triggers.** The conversation-DB scan that
+  detects an exhausted quota matched too broadly: support chats about the very
+  quota code (mentioning `debug_usage.js` / `traffic-hook.sh`) and stale DBs
+  from a previous plan produced phantom "exhausted" states. The parser now
+  (a) skips DBs modified more than 2h ago, (b) requires
+  `"reason":"QUOTA_EXHAUSTED"` within ~250 chars of the reset timestamp
+  instead of a loose `QUOTA_EXHAUSTED …` prefix, and (c) ignores DBs that
+  mention the project's own debug/hook files. A fresh `antigravity-plan` entry
+  also clears a stale `antigravity-quota` from the merged cache.
+- **Usage paths resolve `home` via `os.homedir()` instead of `process.env.HOME`.**
+  `HOME` can be unset or wrong in some sandboxed launch contexts, which made
+  the passive adapters (Claude, Antigravity, Codex) miss their config files.
+  `collectUsage` now receives the home dir explicitly and each reader falls
+  back to `os.homedir()`.
 
 
 ## [0.4.1] - 2026-07-08
