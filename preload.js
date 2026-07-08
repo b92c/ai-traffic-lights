@@ -27,6 +27,10 @@ contextBridge.exposeInMainWorld('trafficLight', {
   getVersion: () => ipcRenderer.invoke('get-version'),        // rodapé das Preferências
   getRepoUrl: () => ipcRenderer.invoke('get-repo-url'),       // link do repo no rodapé
   getUpdate: () => ipcRenderer.invoke('get-update'),           // versão + release mais nova (GitHub)
+  checkUpdate: () => ipcRenderer.send('check-update'),         // "verificar agora" (ignora o cache)
+  downloadUpdate: () => ipcRenderer.send('download-update'),   // AppImage: baixa a nova versão
+  installUpdate: () => ipcRenderer.send('install-update'),     // AppImage: reinicia e instala
+  onUpdateState: (cb) => ipcRenderer.on('update-state', (_e, s) => cb(s)), // push do estado de update
   openExternal: (url) => ipcRenderer.send('open-external', url), // abre no navegador (http/s só)
   saveSettings: (cfg) => ipcRenderer.send('save-settings', cfg),
   openSettings: () => ipcRenderer.send('open-settings'),

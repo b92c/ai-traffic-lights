@@ -526,15 +526,29 @@ function renderLauncher() {
 function renderVersion() {
   if (!$ver) return;
   if (!appVersion && !updateInfo) { $ver.hidden = true; return; }
-  const hasUpdate = !!(updateInfo && updateInfo.hasUpdate && updateInfo.url);
-  const method = updateInfo ? updateInfo.method : '';
+  const u = updateInfo || {};
+  // status: idle | available | downloading | ready | error  (fail-soft cai em available/idle)
+  const status = u.status || (u.hasUpdate ? 'available' : 'idle');
+  const method = u.method || '';
+  const arrowSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
   $ver.hidden = false;
-  $ver.classList.toggle('has-update', hasUpdate);
-  if (hasUpdate) {
-    $ver.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>v' + updateInfo.latest;
-    $ver.setAttribute('data-tip', T('update_available', { v: updateInfo.latest, method }));
+  $ver.classList.toggle('has-update', status === 'available' || status === 'ready');
+  if (status === 'available') {
+    if (u.canAutoInstall) {                                  // AppImage: baixa + instala
+      $ver.innerHTML = '↓ v' + u.latest;
+      $ver.setAttribute('data-tip', T('update_download', { v: u.latest, method }));
+    } else {                                                 // demais métodos: abre a release
+      $ver.innerHTML = arrowSvg + 'v' + u.latest;
+      $ver.setAttribute('data-tip', T('update_available', { v: u.latest, method }));
+    }
+  } else if (status === 'downloading') {
+    $ver.innerHTML = '↓ ' + (u.progress || 0) + '%';
+    $ver.setAttribute('data-tip', T('update_downloading', { p: (u.progress || 0) }));
+  } else if (status === 'ready') {
+    $ver.innerHTML = '↻ v' + u.latest;                       // reiniciar pra instalar
+    $ver.setAttribute('data-tip', T('update_ready', { v: u.latest }));
   } else {
-    $ver.textContent = 'v' + (appVersion || '?');
+    $ver.textContent = 'v' + (appVersion || '?');            // idle / error → discreto
     if (method) $ver.setAttribute('data-tip', T('installed_via', { method })); else $ver.removeAttribute('data-tip');
   }
 }
@@ -587,9 +601,18 @@ if ($toggleFooter) $toggleFooter.addEventListener('click', () => {
   applyFooterMode();
 });
 
-// Botão de versão: só age quando há update (abre a release no navegador).
+// Botão de versão: ramifica por estado. available → baixar (AppImage) ou abrir
+// release (demais); ready → reiniciar e instalar; idle/error → "verificar agora".
 if ($ver) $ver.addEventListener('click', () => {
-  if (updateInfo && updateInfo.hasUpdate && updateInfo.url) window.trafficLight.openExternal(updateInfo.url);
+  const u = updateInfo || {};
+  if (u.status === 'available') {
+    if (u.canAutoInstall) window.trafficLight.downloadUpdate();
+    else if (u.url) window.trafficLight.openExternal(u.url);
+  } else if (u.status === 'ready') {
+    window.trafficLight.installUpdate();
+  } else if (!u.status || u.status === 'idle' || u.status === 'error') {
+    window.trafficLight.checkUpdate();
+  }
 });
 
 // Gripper de resize (largura).
@@ -614,6 +637,7 @@ window.trafficLight.onUsage((u) => { usageEntries = Array.isArray(u) ? u : []; a
 window.trafficLight.requestUsage();
 window.trafficLight.getVersion().then((v) => { appVersion = v || ''; renderVersion(); });
 window.trafficLight.getUpdate().then((i) => { updateInfo = i || null; renderVersion(); });
+window.trafficLight.onUpdateState((s) => { updateInfo = s || null; renderVersion(); });
 window.trafficLight.getAliases().then((a) => { aliases = a || {}; render(); });
 window.trafficLight.getLaunchers().then((l) => { launchers = l || []; render(); });
 window.trafficLight.getSettings().then((c) => {

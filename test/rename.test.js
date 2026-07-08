@@ -49,6 +49,7 @@ async function setup() {
       getLaunchers: () => Promise.resolve([]), launchAgent() {},
       getSettings: () => Promise.resolve(null), onSettingsChanged() {}, // settings (não usados no teste)
       getVersion: () => Promise.resolve('0.0.0'), getUpdate: () => Promise.resolve(null),
+      onUpdateState() {}, checkUpdate() {}, downloadUpdate() {}, installUpdate() {}, // auto-updater
       saveSettings() {}, openSettings() {},
       getLang: () => Promise.resolve('pt'),                             // i18n
 
