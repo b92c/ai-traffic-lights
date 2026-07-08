@@ -7,12 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Preferences redesigned** to match the overlay's custom chrome and apply
+  live. The window is now frameless/transparent with the same rounded panel,
+  drag header, and ✕ as the overlay, organized into two tabs (Geral ·
+  Integração). Every control applies **instantly** to the overlay as you edit
+  (no Save/Cancel — just Fechar), and the transparency slider now dims the
+  Preferences window itself too. The window is a fixed, non-resizable size.
+
+### Removed
+- **Preferences trim.** Dropped the "Sobre" tab (version + GitHub link moved
+  to the footer), the "Janela" section (show/hide + quit already live in the
+  tray), and the "compact list" toggle (already on the overlay header). Eight
+  now-unused i18n strings were removed with them.
+
 ### Fixed
 - **OpenCode permission prompts now turn the light red.** The plugin listened
   for `permission.updated`, which doesn't fire when OpenCode asks — it uses the
   `permission.ask` hook and the `permission.asked` event. The adapter now hooks
   both (→ 🔴🔑) and clears on `permission.replied` (→ Stop). Reinstall with
   `npm run setup-hook` (or the tray) to pick it up.
+- **Preferences: partial config no longer wipes custom launcher paths.** The
+  Preferences window sends only its own keys, but `persistSettings` rebuilt
+  from the defaults — so every save reset `showUsage` / `collapsed` /
+  `launchers`, wiping custom launcher overrides and flipping the footer. It
+  now merges over the current settings.
+- **Preferences window fits small displays.** It's fixed and non-resizable
+  (761px), so on a 1366×768 screen it didn't fit and the footer Fechar button
+  landed off-screen with no way to reach it. The height is now clamped to the
+  display's work area (multi-monitor aware); the body scrolls, so the header,
+  tabs and Fechar always stay visible.
 
 ### Added
 - **OpenCode usage %.** When OpenCode is configured with the z.ai
