@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 ### Changed
 ### Fixed
+
+## [0.6.1] - 2026-07-09
+
+### Added
+### Changed
+### Fixed
 - **detectReset: falso-positivo ao estender o resetAt.** Se a API avançava o
   `resetAt` pra um horário futuro ANTES do tempo (extensão de janela) enquanto a
   cota seguia esgotada, o aviso de "cota resetou" disparava sem ter resetado de
