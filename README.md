@@ -77,7 +77,45 @@ terminal — **window _and_ tab**.
   [Antigravity CLI](https://antigravity.google/docs/cli/reference),
   [Codex](https://github.com/openai/codex) or [OpenCode](https://opencode.ai)
 
-## Install (from source)
+## Install
+
+Pick whichever fits. **All three require the agent hooks** so the overlay can
+see Claude Code / Antigravity / OpenCode sessions — from source you run
+`npm run setup-hook`; in a packaged build you click **Install hooks** in the
+tray menu (or the overlay's onboarding button).
+
+### A — AppImage (recommended, self-updating)
+
+Grab the latest `.AppImage` from the [releases page](https://github.com/aronpc/ai-traffic-lights/releases/latest), drop it in a
+**user-writable** folder (the self-updater rewrites that file in place — so not
+`/opt` or `/usr`), make it executable and run it:
+
+```bash
+mkdir -p ~/Applications
+curl -L -o ~/Applications/AI-Traffic-Lights.AppImage \
+  https://github.com/aronpc/ai-traffic-lights/releases/download/v0.6.0/AI-Traffic-Lights-0.6.0.AppImage
+chmod +x ~/Applications/AI-Traffic-Lights.AppImage
+~/Applications/AI-Traffic-Lights.AppImage
+```
+
+Replace `0.6.0` with the latest release tag. This is the only build that
+**updates itself**: on launch and hourly it checks for a new release, the
+version badge becomes `↓ vX` (download) → `↻` (restart into the new version),
+and the tray has a "Check for updates" entry.
+
+### B — .deb
+
+```bash
+curl -L -o ai-traffic-lights.deb \
+  https://github.com/aronpc/ai-traffic-lights/releases/download/v0.6.0/ai-traffic-lights_0.6.0_amd64.deb
+sudo dpkg -i ai-traffic-lights.deb
+```
+
+Installs under `/opt` and registers a `.desktop` entry. **No self-update** on
+this path (the updater can't replace a root-owned package) — you only get a
+`↑ vX` prompt that opens the release page when a new version ships.
+
+### C — from source (development)
 
 ```bash
 git clone https://github.com/aronpc/ai-traffic-lights.git
