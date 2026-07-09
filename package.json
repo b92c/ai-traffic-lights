@@ -4,7 +4,7 @@
   "description": "Overlay com um semáforo 🟢🟡🔴 por sessão de agente de IA no desktop — Claude Code, Antigravity, Codex e OpenCode via adapters",
   "main": "main.js",
   "scripts": {
-    "start": "electron . --no-sandbox --disable-dev-shm-usage",
+    "start": "electron . --no-sandbox --disable-dev-shm-usage --ozone-platform=x11",
     "setup-hook": "node scripts/setup-hook.js",
     "remove-hook": "node scripts/setup-hook.js --remove",
     "hook:test": "bash hooks/traffic-hook.sh",
@@ -48,7 +48,8 @@
       "synopsis": "Traffic light overlay for terminal AI agent sessions",
       "executableArgs": [
         "--no-sandbox",
-        "--disable-dev-shm-usage"
+        "--disable-dev-shm-usage",
+        "--ozone-platform=x11"
       ]
     }
   },

@@ -40,8 +40,13 @@ app.on('second-instance', () => toggleWin());
 
 // Sessão gráfica: no Wayland, wmctrl/xdotool só enxergam janelas XWayland —
 // o foco por janela degrada e a URI nativa do terminal vira o caminho titular.
-const IS_WAYLAND = process.env.XDG_SESSION_TYPE === 'wayland' ||
-  (!!process.env.WAYLAND_DISPLAY && process.env.XDG_SESSION_TYPE !== 'x11');
+// Em XWayland forçado (--ozone-platform=x11 via executableArgs/start), o app é
+// X11: wmctrl/xdotool enxergam as janelas e alwaysOnTop funciona (Wayland
+// nativo ignora 'above'). Só tratamos como Wayland nativo (onde wmctrl falha e
+// o foco por janela degrada) quando a flag NÃO está presente E a sessão é wayland.
+const IS_WAYLAND = !process.argv.includes('--ozone-platform=x11') &&
+  (process.env.XDG_SESSION_TYPE === 'wayland' ||
+    (!!process.env.WAYLAND_DISPLAY && process.env.XDG_SESSION_TYPE !== 'x11'));
 
 // Diretório de dados neutro (XDG) — o state dir é o contrato entre adapters
 // (escritores) e este app (leitor). Ver src/agents.js e hooks/traffic-hook.sh.
@@ -582,7 +587,7 @@ function createWindow() {
 function toggleWin() {
   if (!win || win.isDestroyed()) return;
   if (win.isVisible()) win.hide();
-  else { win.show(); try { win.setSkipTaskbar(true); } catch {} }
+  else { win.show(); try { win.setSkipTaskbar(true); } catch {} try { win.moveTop(); } catch {} }
 }
 
 // Traz o overlay de volta à tela se ele estiver OCULTO (hide). Não rouba o foco
@@ -595,6 +600,7 @@ function revealIfHidden() {
     if (win && !win.isDestroyed() && !win.isVisible()) {
       win.show();
       try { win.setSkipTaskbar(true); } catch {}
+      try { win.moveTop(); } catch {}
     }
   } catch { /* nunca derruba o fluxo que disparou o reveal */ }
 }
