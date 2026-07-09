@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 ### Changed
 ### Fixed
+
+## [0.6.2] - 2026-07-09
+
+### Added
+### Changed
+### Fixed
 - **Label de uso sempre "Provider(Plano) janela".** A 2ª linha de um mesmo plano
   (ex.: o limite de Tokens do GLM z.ai) aparecia sem o provedor, parecendo outro
   agente. Agora cada linha é autônoma e sempre mostra `Provider(Plano)` + a
