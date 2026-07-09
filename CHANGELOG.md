@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 ### Changed
 ### Fixed
+- **Overlay e Preferências não renderizavam (ficavam transparentes) na AppImage.**
+  O `--disable-dev-shm-usage` vinha de um `app.commandLine.appendSwitch()` no
+  `main.js`, que roda DEPOIS do Chromium já ter inicializado o sandbox e o
+  shared-memory — tarde demais. Sem memória compartilhada, o compositing falhava
+  e a janela ficava totalmente transparente (só o tray aparecia). Movido pra
+  `build.linux.executableArgs` (e `scripts.start`), chegando na linha de comando
+  antes do Chromium, igual ao `--no-sandbox`.
 
 ## [0.6.2] - 2026-07-09
 

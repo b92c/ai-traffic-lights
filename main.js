@@ -19,11 +19,11 @@ const usage = require('./src/usage');
 const { spawn } = require('child_process');
 const { desktopEscape } = require('./src/validate');
 
-app.commandLine.appendSwitch('no-sandbox'); // sandbox SUID sem root no host
-// Necessário neste host: o renderer do Chromium crasha ao alocar shared memory
-// em /dev/shm (errno 3/ESRCH neste kernel). Sem isto, só o tray sobe e nenhuma
-// janela desenha. Faz o Chromium usar /tmp em vez de /dev/shm.
-app.commandLine.appendSwitch('disable-dev-shm-usage');
+// Flags de sandbox/shared-memory (--no-sandbox --disable-dev-shm-usage) vão na
+// LINHA DE COMANDO: build.linux.executableArgs (packaged) e scripts.start (dev).
+// Precisam chegar ao Chromium ANTES de ele inicializar o sandbox/shm — aqui no
+// main.js é tarde demais (appendSwitch não funciona p/ esses switches), e a
+// janela ficava transparente (sem compositing). Não usar appendSwitch aqui.
 
 // Versão do app (do package.json — app.getVersion lê direto, funciona no asar)
 // e URL pública do repo (rodapé das Preferências + tooltip do tray).
