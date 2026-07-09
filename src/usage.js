@@ -779,17 +779,19 @@ function detectReset(prevState, entries, now, threshold) {
   const nextState = {};
   const toNotify = [];
   for (const e of Array.isArray(entries) ? entries : []) {
-    if (!e || !e.resetAt) continue;                    // sem horário de reset → não dá pra detectar
+    if (!e || !e.id || nextState[e.id]) continue;       // sem id, ou id já visto neste tick → dedupe
+    if (!e.resetAt) continue;                            // sem horário de reset → não dá pra detectar
     const resetAtMs = Date.parse(e.resetAt);
     if (Number.isNaN(resetAtMs)) continue;             // resetAt malformado → ignora
     const armed = typeof e.usedPct === 'number' && e.usedPct >= threshold;
     const p = prev[e.id];                              // estado anterior deste limite (ou undefined)
 
-    // Resetou estando armado? A janela virou (o relógio passou do reset anterior
-    // OU o resetAt saltou pra frente) E o limite estava esgotado na leitura
-    // ANTERIOR — no instante do reset o % já caiu, então "estava esgotado" só
-    // existe em `p`. É por isso que a função carrega estado entre coletas.
-    const windowTurned = !!p && (now >= p.resetAtMs || resetAtMs > p.resetAtMs);
+    // Resetou estando armado? O relógio passou do resetAt da leitura ANTERIOR E
+    // o limite estava esgotado nessa leitura — no instante do reset o % já caiu,
+    // então "estava esgotado" só existe em `p`. (Só `now >= p.resetAtMs`: antes
+    // havia `|| resetAtMs > p.resetAtMs`, mas era falso positivo quando a API
+    // estendia o resetAt antes do tempo sem resetar de verdade.)
+    const windowTurned = !!p && now >= p.resetAtMs;
     const resetou = windowTurned && p.armed;
     if (resetou) toNotify.push(e);
     // Re-arma pelo % atual, mas "gruda" o armado enquanto a MESMA janela segue:

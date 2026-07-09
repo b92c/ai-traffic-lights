@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 ### Changed
 ### Fixed
+- **detectReset: falso-positivo ao estender o resetAt.** Se a API avançava o
+  `resetAt` pra um horário futuro ANTES do tempo (extensão de janela) enquanto a
+  cota seguia esgotada, o aviso de "cota resetou" disparava sem ter resetado de
+  verdade. A transição agora exige que o relógio passe do reset anterior
+  (`now >= resetAt`), não basta o `resetAt` ter saltado.
+- **detectReset: duplicata de id não duplica o aviso.** Duas entradas com o
+  mesmo `id` numa coleta poderiam disparar duas notificações; agora há dedupe
+  por id dentro do tick.
 
 ## [0.6.0] - 2026-07-09
 

@@ -726,3 +726,20 @@ test('detectReset: threshold configurável — em 100 só esgotamento total arma
   const { toNotify } = detectReset(s1, [RESET_ENTRY('glm-tokens', 5, '2026-07-07T22:00:00Z')], later, 100);
   assert.equal(toNotify.length, 0, '95 < 100 → não armou, logo não notifica');
 });
+
+test('detectReset: resetAt estendido ANTES do tempo (sem reset) não notifica', () => {
+  // 12:00 esgotado, reset 17:00; às 16:00 (ainda ANTES das 17:00) a API estendeu
+  // o resetAt pra 20:00 e o % continua 95 → NÃO houve reset, só mudou o horário.
+  const s1 = detectReset(null, [RESET_ENTRY('glm-tokens', 95, '2026-07-07T17:00:00Z')], NOW, 90).nextState;
+  const before = NOW + 4 * H;
+  const { toNotify } = detectReset(s1, [RESET_ENTRY('glm-tokens', 95, '2026-07-07T20:00:00Z')], before, 90);
+  assert.equal(toNotify.length, 0, 'extensão de resetAt sem o tempo passar não é reset');
+});
+
+test('detectReset: 2 entries mesmo id numa coleta → só 1 notificação', () => {
+  const s1 = detectReset(null, [RESET_ENTRY('glm-tokens', 100, '2026-07-07T17:00:00Z')], NOW, 90).nextState;
+  const later = NOW + 6 * H;
+  const e = RESET_ENTRY('glm-tokens', 4, '2026-07-07T22:00:00Z');
+  const { toNotify } = detectReset(s1, [e, e], later, 90);
+  assert.equal(toNotify.length, 1, 'duplicata de id não duplica o aviso');
+});
