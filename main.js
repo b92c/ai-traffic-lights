@@ -546,6 +546,7 @@ function createWindow() {
     alwaysOnTop: true,
     hasShadow: false,
     backgroundColor: '#00000000',
+    icon: path.join(__dirname, 'build/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -723,7 +724,7 @@ function createSettingsWindow() {
     x: typeof b.x === 'number' ? b.x : undefined,   // posição é lembrada; tamanho não
     y: typeof b.y === 'number' ? b.y : undefined,
     title: T('prefs_title'),
-    icon: path.join(__dirname, 'assets/tray-icon.png'),
+    icon: path.join(__dirname, 'build/icon.png'),
     // Mesmo chrome custom do overlay (ver createWindow acima): sem moldura
     // nativa + fundo transparente — o .prefs (settings.css) desenha o painel
     // arredondado com borda e sombra, e o header .bar é arrastável.

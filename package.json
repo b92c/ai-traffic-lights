@@ -30,7 +30,8 @@
       "src/**/*",
       "hooks/**/*",
       "adapters/**/*",
-      "assets/tray-icon*.png"
+      "assets/tray-icon*.png",
+      "build/icon.png"
     ],
     "publish": {
       "provider": "github",
