@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 ### Changed
 ### Fixed
+
+## [0.6.3] - 2026-07-09
+
+### Added
+### Changed
+### Fixed
 - **Overlay e Preferências não renderizavam (ficavam transparentes) na AppImage.**
   O `--disable-dev-shm-usage` vinha de um `app.commandLine.appendSwitch()` no
   `main.js`, que roda DEPOIS do Chromium já ter inicializado o sandbox e o
