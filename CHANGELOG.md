@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 ### Fixed
 
+## [0.6.6] - 2026-07-09
+
+### Added
+- **"Trazer à frente quando oculto"** (aba Notificações das Preferências). Três
+  checkboxes (múltipla escolha) que fazem o overlay **voltar a aparecer na tela
+  quando oculto, sem roubar o foco**, disparado por: um agente ficar vermelho, a
+  cota resetar, ou haver uma nova versão disponível. Cada evento só dispara se a
+  opção correspondente estiver marcada.
+- **`install.sh`** — instala e configura o latest da AppImage numa linha:
+  `curl -fsSL https://raw.githubusercontent.com/aronpc/ai-traffic-lights/main/install.sh | bash`.
+  Baixa a versão mais recente via GitHub API, dá permissão de execução, instala o
+  ícone no tema do sistema e cria o `.desktop` (`Icon=` + `StartupWMClass`). Sem
+  depender de `jq`; suporta `--uninstall` e `INSTALL_DIR` custom. Idempotente
+  (rodar de novo = atualizar).
+
+### Changed
+- Aba **Notificações compactada** (checkboxes da nova seção em 2 colunas + labels
+  curtos) e altura da janela de Preferências `761 → 770` para acomodar o conteúdo
+  sem rolagem.
+- **READMEs** (en + pt-BR): seção de instalação AppImage agora usa o `install.sh`
+  (principal) com a opção manual em `<details>`; removido o hardcode de versão
+  (`v0.6.0`) que ficava desatualizado.
+
 ## [0.6.5] - 2026-07-09
 
 ### Added
