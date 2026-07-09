@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 ### Fixed
 
+## [0.6.5] - 2026-07-09
+
+### Added
+### Changed
+### Fixed
+- **Auto-update via AppImage finalmente funciona.** Nunca tinha chegado a funcionar
+  por dois motivos: (1) `electron-updater` estava em `devDependencies`, e o
+  electron-builder **não** empacota devDependencies → `require('electron-updater')`
+  lançava `MODULE_NOT_FOUND` na AppImage → o autoUpdater ficava `null` → sempre caía
+  no fallback "abrir release". Movido para `dependencies`. (2) `detectInstallMethod`
+  só checava `process.env.APPIMAGE`, que o Electron 43 perde no re-exec do sandbox →
+  nunca detectava a AppImage. Agora detecta também pelo `execPath` (mount point
+  `/tmp/.mount_<nome>`) e recupera o caminho do `.AppImage` (cascata: env → execPath
+  → `Exec=` do `.desktop` → busca em locais canônicos), re-exportando em
+  `process.env.APPIMAGE`, que o electron-updater precisa para substituir o arquivo.
+
 ## [0.6.4] - 2026-07-09
 
 ### Added
