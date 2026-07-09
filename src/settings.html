@@ -100,6 +100,41 @@
             <div class="hint" data-i18n="reset_threshold_hint">Só avisa se o uso tinha passado deste % antes de resetar.</div>
           </div>
         </div>
+
+        <div class="section">
+          <div class="section-title" data-i18n="sec_alert_sound">Som do alerta</div>
+          <div class="row">
+            <input type="checkbox" id="soundEnabled">
+            <label for="soundEnabled" data-i18n="sound_enabled_label">Tocar som quando algo fica vermelho</label>
+          </div>
+          <div class="field">
+            <label class="top" for="soundType" data-i18n="sound_type_label">Som</label>
+            <select id="soundType">
+              <option value="beep" data-i18n="sound_beep">Bip</option>
+              <option value="double" data-i18n="sound_double">Toque duplo</option>
+              <option value="chime" data-i18n="sound_chime">Sino</option>
+              <option value="low" data-i18n="sound_low">Grave</option>
+              <option value="custom" data-i18n="sound_custom">Arquivo próprio…</option>
+            </select>
+          </div>
+          <div class="field" id="soundFileField" hidden>
+            <label class="top" data-i18n="sound_file_label">Arquivo de áudio</label>
+            <div class="btn-row">
+              <button id="soundPick" data-i18n="sound_pick">Escolher arquivo…</button>
+            </div>
+            <div class="hint"><span id="soundFileName">—</span></div>
+          </div>
+          <div class="field">
+            <label class="top" for="soundVolume" data-i18n="sound_volume_label">Volume</label>
+            <div class="range-row">
+              <input type="range" id="soundVolume" min="0" max="100" step="1">
+              <span class="range-val" id="soundVolumeVal">18%</span>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button id="soundTest" data-i18n="sound_test">▶ Testar som</button>
+          </div>
+        </div>
       </section>
 
       <!-- ===================== ABA: INTEGRAÇÃO ===================== -->
@@ -144,6 +179,8 @@
   </div>
 
   <script src="i18n.js"></script>
+  <script src="sound.js"></script>
+  <script src="ui-select.js"></script>
   <script src="settings-renderer.js"></script>
 </body>
 </html>
