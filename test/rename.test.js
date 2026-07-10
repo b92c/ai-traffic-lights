@@ -42,7 +42,7 @@ async function setup() {
     trafficLight: {
       onSessions: (cb) => { sessionsCb = cb; },
       requestSessions() {}, setExpanded() {}, autoHeight() {},
-      onUsage() {}, requestUsage() {},
+      onUsage() {}, requestUsage() {}, onUsageMeta() {}, forceUsage() {},
       resizeStart() {}, resizeMove() {}, focus() {},
       getAliases: () => Promise.resolve({}), setAlias: (cwd, v) => calls.setAlias.push([cwd, v]),
       notify() {}, toggleVisibility() {}, setTrayLevel() {},

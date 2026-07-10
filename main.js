@@ -1146,6 +1146,8 @@ async function collectAndSendUsage() {
     if (Array.isArray(entries)) { lastUsage = usage.mergeUsage(lastUsage, entries); saveUsage(); maybeNotifyReset(); }
   } catch { /* collectUsage já engole erros internamente; defeção dupla */ }
   sendToRenderer('usage', lastUsage);
+  // meta p/ a UI: o cooldown do 429 (se vigente) alimenta o tooltip do botão ⟳.
+  sendToRenderer('usage-meta', { claudeCooldownUntil: claudeCooldownUntil > Date.now() ? claudeCooldownUntil : 0 });
 }
 
 // Estado (por id) que detectReset usa entre coletas p/ achar a transição
@@ -1172,6 +1174,16 @@ function maybeNotifyReset() {
 }
 ipcMain.on('request-usage', () => {
   sendToRenderer('usage', lastUsage);
+  sendToRenderer('usage-meta', { claudeCooldownUntil: claudeCooldownUntil > Date.now() ? claudeCooldownUntil : 0 });
+});
+
+// Force (botão ⟳): fura o cache de CONVENIÊNCIA (5min Claude / 30s GLM) e
+// recoleta na hora. NÃO fura o cooldown do 429 — esse vive no disco e é injetado
+// em collectUsage, então mesmo com o cache limpo o coletor não re-bate durante a
+// janela de rate limit (evita re-escalar). É "atualizar já", não "ignorar limite".
+ipcMain.on('force-usage', () => {
+  try { usage._clearClaudeCache(); usage._clearGlmCache(); usage._clearCodexCache(); } catch { /* ignore */ }
+  collectAndSendUsage();
 });
 
 // ---- update checker (versão + release mais nova do GitHub) ----
