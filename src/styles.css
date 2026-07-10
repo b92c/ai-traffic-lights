@@ -105,6 +105,11 @@ html, body {
 }
 .btn:hover { background: rgba(255,255,255,0.10); color: var(--ink); }
 .btn-close:hover { background: rgba(224,86,63,0.22); color: var(--red); }
+/* Force (⟳): gira o ícone enquanto recoleta (feedback de "atualizando"). */
+.btn.is-spinning svg { animation: spin 0.6s linear; transform-origin: center; }
+@keyframes spin { to { transform: rotate(360deg); } }
+/* Force em cooldown do 429: meio apagado sinaliza que está rate-limited. */
+.btn.is-cooldown { opacity: 0.45; cursor: not-allowed; }
 /* Ícones SVG (substituem glyphs de texto/emoji — alinhamento perfeito pois
    o desenho é centrado no viewBox, sem depender de métrica de fonte). */
 .btn svg { width: 16px; height: 16px; display: block; }

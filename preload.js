@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('trafficLight', {
   // main a cada 60s + carga sob demanda. entries: [{agent,title,usedPct,resetAt,...}]
   onUsage: (cb) => ipcRenderer.on('usage', (_e, entries) => cb(entries)),
   requestUsage: () => ipcRenderer.send('request-usage'),
+  forceUsage: () => ipcRenderer.send('force-usage'), // fura o cache de conveniência e recoleta já (respeita o cooldown do 429)
+  onUsageMeta: (cb) => ipcRenderer.on('usage-meta', (_e, meta) => cb(meta)), // {claudeCooldownUntil} — p/ o tooltip do force
   setExpanded: (expanded, h) => ipcRenderer.send('set-expanded', { expanded, h }),
   autoHeight: (h) => ipcRenderer.send('auto-height', h),
   resizeStart: () => ipcRenderer.send('resize-start'),

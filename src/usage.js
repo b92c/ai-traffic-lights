@@ -33,6 +33,16 @@ const CLAUDE_TIER_LABEL = {
   default_claude_max_20x: 'Max 20×',
 };
 
+// ---- tradução de organizationType → label humano (fallback quando o tier não é
+// um dos Max conhecidos). Cobre contas Team/Pro/Enterprise cujo tier tem código
+// interno opaco (ex.: default_raven) que não mapeamos individualmente. ----
+const CLAUDE_ORG_LABEL = {
+  claude_max: 'Claude Max',
+  claude_team: 'Claude Team',
+  claude_pro: 'Claude Pro',
+  claude_enterprise: 'Claude Enterprise',
+};
+
 // =========================== LÓGICA PURA (parse) ===========================
 
 // Extrai reset/plano/passes de um objeto .claude.json já parseado.
@@ -48,11 +58,18 @@ function parseClaudeConfig(cfg, now) {
   if (saffron.planLimitsEndDate) out.resetAt = saffron.planLimitsEndDate;
 
   // plano: oauthAccount.organizationType / organizationRateLimitTier
+  // Ordem: tier Max conhecido (mais específico) → tipo de org conhecido → org
+  // presente mas desconhecida (rótulo genérico "Claude"). Só fica null quando
+  // NÃO há conta OAuth alguma — aí o coletor omite o Claude do overlay.
   const acc = cfg.oauthAccount || {};
   if (acc.organizationRateLimitTier && CLAUDE_TIER_LABEL[acc.organizationRateLimitTier]) {
     out.plan = 'Claude ' + CLAUDE_TIER_LABEL[acc.organizationRateLimitTier];
-  } else if (acc.organizationType === 'claude_max') {
-    out.plan = 'Claude Max';
+  } else if (acc.organizationType && CLAUDE_ORG_LABEL[acc.organizationType]) {
+    out.plan = CLAUDE_ORG_LABEL[acc.organizationType];
+  } else if (acc.organizationType || acc.organizationUuid || acc.emailAddress) {
+    // conta existe (algum campo de identidade), mas tipo/tier não mapeados →
+    // não some do overlay; mostra o rótulo genérico.
+    out.plan = 'Claude';
   }
 
   // passes restantes (free passes do plano)
@@ -150,6 +167,26 @@ function parseAnthropicUsage(payload, now) {
       ? Math.max(0, Math.round((Date.parse(resetAt) - nowMs) / 60000)) : null;
     out.push({ title: w.title, usedPct: clampPct(win.utilization), resetAt, resetInMin });
   }
+  // extra_usage: uso "extra"/overage medido em dinheiro (Team/Enterprise com
+  // limite mensal de crédito, ou Pro com overage). used_credits/monthly_limit
+  // vêm em UNIDADES MENORES da moeda (decimal_places: USD=2 → centavos). Vira um
+  // tile "Extra" com % e o valor gasto/limite (ex.: "$50.4/$50"). Só entra quando
+  // habilitado e com limite positivo — senão fica fora (não polui a barra).
+  const ex = payload.extra_usage;
+  if (ex && typeof ex === 'object' && ex.is_enabled && typeof ex.monthly_limit === 'number' && ex.monthly_limit > 0) {
+    const dec = (typeof ex.decimal_places === 'number' && ex.decimal_places >= 0 && ex.decimal_places <= 4) ? ex.decimal_places : 2;
+    const div = Math.pow(10, dec);
+    const spent = typeof ex.used_credits === 'number' ? ex.used_credits / div : null;
+    const limit = ex.monthly_limit / div;
+    const pct = typeof ex.utilization === 'number' ? clampPct(ex.utilization)
+      : (spent != null ? clampPct((spent / limit) * 100) : null);
+    const resetAt = typeof ex.resets_at === 'string' ? ex.resets_at : null;
+    const resetInMin = resetAt && !Number.isNaN(Date.parse(resetAt))
+      ? Math.max(0, Math.round((Date.parse(resetAt) - nowMs) / 60000)) : null;
+    const sym = ex.currency === 'USD' || !ex.currency ? '$' : (ex.currency + ' ');
+    const extra = spent != null ? `${sym}${spent.toFixed(dec === 0 ? 0 : 1)}/${sym}${limit.toFixed(dec === 0 ? 0 : 1)}` : null;
+    out.push({ title: 'Extra', usedPct: pct, resetAt, resetInMin, extra });
+  }
   return out;
 }
 
@@ -189,14 +226,18 @@ function windowTitle(min) {
 
 // =========================== I/O ===========================
 
-// Resolve o label do plano Claude (tier) a partir do .claude.json. Barato,
-// síncrono. Devolve 'Claude Max 5×' / 'Claude Max' / 'Claude'.
-function claudePlanLabel({ home } = {}) {
+// Lê o .claude.json e devolve o objeto COMPLETO do parseClaudeConfig — plano e
+// passes (o tile plano-só usa isso quando a API OAuth não responde). Barato,
+// síncrono. Devolve null quando NÃO há conta OAuth (sem .claude.json ou sem
+// campos de identidade) — distingue "sem Claude" de "Claude sem plano mapeado".
+// Obs.: parsed.resetAt aqui é o planLimitsEndDate (fim do ciclo do PLANO), NÃO o
+// reset da janela de uso — por isso o caller o ignora no tile plano-só.
+function readClaudeConfig({ home, now } = {}) {
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(home || os.homedir(), '.claude.json'), 'utf8'));
-    const p = parseClaudeConfig(cfg, 0);
-    return p.plan || 'Claude';
-  } catch { return 'Claude'; }
+    const parsed = parseClaudeConfig(cfg, now || Date.now());
+    return parsed.plan ? parsed : null;   // sem conta (plan null) → null
+  } catch { return null; }
 }
 
 // Lê o OAuth access token do Claude Code de ~/.claude/.credentials.json
@@ -204,29 +245,77 @@ function claudePlanLabel({ home } = {}) {
 // não gravamos nem renovamos — se estiver expirado, a API rejeita e caímos no
 // fallback plano-só (o Claude Code renova sozinho no uso normal). Nunca lança.
 function readClaudeOAuthToken({ home } = {}) {
+  return readClaudeCreds({ home }).accessToken;
+}
+
+// Lê as credenciais OAuth: accessToken + subscriptionType + rateLimitTier. Estes
+// dois últimos são a fonte MAIS confiável do plano (o .claude.json pode trazer um
+// tier interno opaco como 'default_raven', enquanto as credenciais trazem o tier
+// real 'default_claude_max_5x'). Nunca lança — campos ausentes viram null.
+function readClaudeCreds({ home } = {}) {
   try {
     const creds = JSON.parse(fs.readFileSync(path.join(home || os.homedir(), '.claude/.credentials.json'), 'utf8'));
-    const t = creds && creds.claudeAiOauth && creds.claudeAiOauth.accessToken;
-    return typeof t === 'string' && t ? t : null;
-  } catch { return null; }
+    const o = (creds && creds.claudeAiOauth) || {};
+    return {
+      accessToken: typeof o.accessToken === 'string' && o.accessToken ? o.accessToken : null,
+      subscriptionType: typeof o.subscriptionType === 'string' ? o.subscriptionType : null,
+      rateLimitTier: typeof o.rateLimitTier === 'string' ? o.rateLimitTier : null,
+    };
+  } catch { return { accessToken: null, subscriptionType: null, rateLimitTier: null }; }
+}
+
+// Resolve o rótulo do plano a partir das credenciais (fonte confiável). O tier
+// Max conhecido vence; senão o subscriptionType (team/pro/enterprise) vira label.
+// Devolve null se as credenciais não bastam (o caller cai no .claude.json).
+function claudePlanFromCreds({ subscriptionType, rateLimitTier } = {}) {
+  if (rateLimitTier && CLAUDE_TIER_LABEL[rateLimitTier]) return 'Claude ' + CLAUDE_TIER_LABEL[rateLimitTier];
+  const sub = (subscriptionType || '').toLowerCase();
+  const SUB_LABEL = { max: 'Claude Max', team: 'Claude Team', pro: 'Claude Pro', enterprise: 'Claude Enterprise' };
+  if (SUB_LABEL[sub]) return SUB_LABEL[sub];
+  return null;
 }
 
 // Coletor do Claude. Tenta a API OAuth de uso (% E reset REAIS das janelas 5h e
 // 7 dias — o mesmo dado do painel/`/status`); se não houver token ou a chamada
 // falhar, cai no fallback: uma linha só com o plano (sem número, honesto).
 // Cache por token, 30s. Nunca lança.
-const _claudeCacheByToken = new Map(); // token → { at, entries }
-async function readClaudeUsage({ home, now, fetcher } = {}) {
-  const plan = claudePlanLabel({ home });
-  const token = readClaudeOAuthToken({ home });
-  const planOnly = plan !== 'Claude'
-    ? [{ id: 'claude-plan', agent: 'claude', plan, title: null, usedPct: null, resetAt: null, resetInMin: null, extra: null, source: 'claude.json', error: null }]
+//
+// 429 (rate limit): a API manda Retry-After (ex.: ~1000s). Rebater a cada 60s
+// RENOVA a penalidade e o % nunca volta — foi o bug do "Claude sumiu". Ao levar
+// 429 agendamos um cooldown (respeitando Retry-After) durante o qual NÃO batemos
+// na API: devolvemos o último valor bom conhecido, ou o plano-só. Assim o tile
+// não some nem pisca ⚠ e a janela de rate limit expira sozinha.
+const _claudeCacheByToken = new Map(); // token → { at, entries, cooldownUntil }
+async function readClaudeUsage({ home, now, fetcher, cooldownUntil, cooldownFails, setCooldown } = {}) {
+  const pc = readClaudeConfig({ home, now });
+  const creds = readClaudeCreds({ home });
+  // Plano: credenciais primeiro (tier/subscription REAIS — ex.: 'default_claude_max_5x'),
+  // depois o .claude.json (que pode ter só um tier interno opaco). Se nenhum
+  // resolve mas há conta, cai no genérico do .claude.json (ou null = sem conta).
+  const plan = claudePlanFromCreds(creds) || (pc ? pc.plan : null);
+  const token = creds.accessToken;
+  // Tile plano-só (sem a API OAuth): mostra só o plano + passes, SEM reset. O
+  // planLimitsEndDate do .claude.json é o fim do ciclo do PLANO (ex.: Jul 13),
+  // NÃO o reset da janela de uso (5h/7d, que reseta várias vezes até lá) — pô-lo
+  // aqui enganava ("3d" logo após a janela ter resetado). O reset REAL das
+  // janelas só existe no runtime da API (resets_at) → sem API, honestamente sem
+  // reset. `passes` (free passes do plano) é info local legítima, fica.
+  const planOnly = plan
+    ? [{ id: 'claude-plan', agent: 'claude', plan, title: null, usedPct: null,
+        resetAt: null, resetInMin: null,
+        extra: (pc.passes != null ? pc.passes + ' passes' : null),
+        source: 'claude.json', error: null }]
     : null;
   if (!token) return planOnly;
 
   const nowMs = now || Date.now();
   const cached = _claudeCacheByToken.get(token);
-  if (cached && (nowMs - cached.at) < CACHE_MS) return cached.entries;
+  if (cached && (nowMs - cached.at) < CLAUDE_CACHE_MS) return cached.entries;
+  // Cooldown PERSISTIDO (injetado pelo main.js, sobrevive a restart): sem isto,
+  // `bun start`/dev perde o cooldown em memória a cada reinício, re-bate no boot
+  // e RE-ESCALA o 429 (o servidor sobe o Retry-After a cada toque). Não rebate.
+  const cd = Math.max(cached && cached.cooldownUntil || 0, cooldownUntil || 0);
+  if (cd && nowMs < cd) return (cached && cached.entries) || planOnly;
 
   const headers = {
     Authorization: 'Bearer ' + token,
@@ -237,24 +326,45 @@ async function readClaudeUsage({ home, now, fetcher } = {}) {
   let payload;
   try {
     payload = await _httpsGetJson('https://api.anthropic.com/api/oauth/usage', headers, fetcher);
-  } catch {
+  } catch (e) {
+    // 429 → backoff exponencial: cada 429 seguido alonga a espera (Retry-After ×
+    // 1.5^fails, teto 1h) p/ dar espaço ao limite agregado recuperar. Mantém o
+    // último valor bom (ou plano-só). Outras falhas (401/offline) → plano-só.
+    if (e && e.statusCode === 429) {
+      const baseMs = (typeof e.retryAfterMs === 'number' && e.retryAfterMs > 0)
+        ? e.retryAfterMs : CLAUDE_429_COOLDOWN_MS;
+      const fails = (cached && cached.fails) || (cooldownFails || 0);
+      const backoff = Math.min(CLAUDE_429_MAX_BACKOFF_MS,
+        Math.round(baseMs * Math.pow(CLAUDE_429_BACKOFF_FACTOR, fails)));
+      const until = nowMs + backoff;
+      const keep = (cached && cached.entries) ? cached.entries : planOnly;
+      _claudeCacheByToken.set(token, { at: nowMs, entries: keep, cooldownUntil: until, fails: fails + 1 });
+      // Persiste {until, fails} (só timestamps/contador, nunca o token) p/ restart.
+      if (typeof setCooldown === 'function') { try { setCooldown({ until, fails: fails + 1 }); } catch { /* nunca quebra a coleta */ } }
+      return keep;
+    }
     return planOnly; // token expirado/offline → plano-só (não polui com ⚠)
   }
   const windows = parseAnthropicUsage(payload, nowMs);
   if (!windows.length) return planOnly;
+  // id estável por janela (5h/7d/extra) — o 'Extra' (overage) NÃO pode colidir
+  // com o 7d; um mapa explícito evita o ternário que jogava tudo em '7d'.
+  const idByTitle = { '5 h': 'claude-5h', '7 dias': 'claude-7d', 'Extra': 'claude-extra' };
   const entries = windows.map((w) => ({
-    id: 'claude-' + (w.title === '5 h' ? '5h' : '7d'),
+    id: idByTitle[w.title] || 'claude-' + String(w.title).replace(/\s+/g, ''),
     agent: 'claude',
     title: w.title,
     plan,
     usedPct: w.usedPct,
     resetAt: w.resetAt,
     resetInMin: w.resetInMin,
-    extra: null,
+    extra: w.extra || null,          // 'Extra' traz "$50.4/$50"; janelas não têm
     source: 'anthropic.oauth',
     error: null,
   }));
-  _claudeCacheByToken.set(token, { at: nowMs, entries });
+  _claudeCacheByToken.set(token, { at: nowMs, entries, fails: 0 });
+  // Sucesso → zera o backoff persistido (libera p/ futuras coletas normais).
+  if (typeof setCooldown === 'function') { try { setCooldown({ until: 0, fails: 0 }); } catch { /* nunca quebra a coleta */ } }
   return entries;
 }
 function _clearClaudeCache() { _claudeCacheByToken.clear(); }
@@ -498,6 +608,18 @@ function defaultListAntigravityDbs(base) {
   catch { return []; }
 }
 
+// Converte o header Retry-After em ms. Aceita os dois formatos do HTTP: um
+// número de SEGUNDOS ("1007") ou uma data HTTP ("Wed, 21 Oct 2026 07:28:00 GMT").
+// `now` em ms (injetável p/ teste). Devolve ms >= 0, ou null se ilegível.
+function parseRetryAfter(header, now) {
+  if (header == null) return null;
+  const s = String(header).trim();
+  if (/^\d+$/.test(s)) return parseInt(s, 10) * 1000;   // delta-seconds
+  const when = Date.parse(s);                             // HTTP-date
+  if (Number.isNaN(when)) return null;
+  return Math.max(0, when - (now || Date.now()));
+}
+
 // Faz um GET HTTPS injetando um `fetcher` (testável). Em produção usa https.get.
 // Devolve o JSON parseado ou lança (quem chama captura).
 function _httpsGetJson(url, headers, fetcher, timeoutMs = 4000) {
@@ -508,8 +630,15 @@ function _httpsGetJson(url, headers, fetcher, timeoutMs = 4000) {
       (res) => {
         let data = '';
         res.on('data', (c) => { data += c; });
-        res.on('end', () => res.statusCode === 200
-          ? resolve(data) : reject(new Error(`HTTP ${res.statusCode}`)));
+        res.on('end', () => {
+          if (res.statusCode === 200) { resolve(data); return; }
+          // Anexa metadados ao erro p/ o caller decidir backoff (429 → cooldown).
+          const err = new Error(`HTTP ${res.statusCode}`);
+          err.statusCode = res.statusCode;
+          const ra = parseRetryAfter(res.headers && res.headers['retry-after']);
+          if (ra != null) err.retryAfterMs = ra;
+          reject(err);
+        });
       },
     );
     req.on('error', reject);
@@ -525,6 +654,18 @@ function _httpsGetJson(url, headers, fetcher, timeoutMs = 4000) {
 // não se sobrescrevem no cache. `label`/`suffix` distinguem contas na UI quando
 // há mais de uma (multi-conta); com 1 conta ficam vazios e o id fica canônico.
 const CACHE_MS = 30 * 1000;
+// O Claude tem cache PRÓPRIO e mais longo: a API /api/oauth/usage é fortemente
+// rate-limited (Retry-After ~1000s) e as janelas são de 5h/7d — o % mal muda em
+// minutos. 5 min = no máx. 12 req/h, tira a pressão do endpoint. (GLM segue 30s.)
+const CLAUDE_CACHE_MS = 5 * 60 * 1000; // 5 min
+// Cooldown padrão quando o 429 não traz Retry-After legível (fallback conservador).
+const CLAUDE_429_COOLDOWN_MS = 15 * 60 * 1000; // 15 min
+// Backoff exponencial: a cada 429 SEGUIDO, o app espera cada vez mais antes de
+// tentar (Retry-After × 1.5^fails), até o teto. Evita o ciclo "cooldown expira →
+// rebater → 429 de novo → re-armar" que mantinha o limite agregado estourado (o
+// mesmo endpoint é consultado pelo próprio Claude Code no /status). Teto de 1h.
+const CLAUDE_429_BACKOFF_FACTOR = 1.5;
+const CLAUDE_429_MAX_BACKOFF_MS = 60 * 60 * 1000;
 const _glmCacheByToken = new Map(); // token → { at, entries }
 async function readGlmUsage({ env, now, fetcher, label, suffix } = {}) {
   const E = env || process.env;
@@ -609,7 +750,11 @@ async function collectUsage(opts = {}) {
   // Claude usa opts.claudeFetcher (separado do de GLM: cada API tem schema/mock
   // próprio; em teste sem claudeFetcher e sem token, o Claude cai no plano-só).
   const [claude, antigravity, ...glm] = await Promise.all([
-    readClaudeUsage({ home: opts.home, now: opts.now, fetcher: opts.claudeFetcher }).catch(() => null),
+    readClaudeUsage({
+      home: opts.home, now: opts.now, fetcher: opts.claudeFetcher,
+      cooldownUntil: opts.claudeCooldownUntil, cooldownFails: opts.claudeCooldownFails,
+      setCooldown: opts.claudeSetCooldown,
+    }).catch(() => null),
     Promise.resolve().then(() => readAntigravityUsage({ home: opts.home })).catch(() => null),
     ...creds.map((c) => readGlmUsage({
       env: c.env, now: opts.now, fetcher: opts.fetcher,
@@ -734,7 +879,14 @@ function mergeUsage(prev, fresh, now) {
     // como resquício legado no usage.json. Sem isto as duas versões têm chaves
     // diferentes e não colapsam → o GLM aparece duplicado ("z.ai 2×").
     const planNorm = String(e.plan || '').replace(/\s*\((z\.ai|bigmodel\.cn)\)\s*$/, '').trim();
-    const key = [e.agent, e.title || '', planNorm, e.resetAt || ''].join('|');
+    // Normaliza o resetAt p/ SEGUNDOS na chave: a mesma conta chegando por 2
+    // credenciais (tokens distintos) recebe resetAt da API com diferença de ~1ms
+    // ("...09.995Z" vs "...09.996Z") — sem isto, a chave difere e o tile mensal
+    // aparece duplicado ("z.ai Pro mês 2×"). Trunca sub-segundo; contas realmente
+    // distintas têm resets separados por muito mais que 1s.
+    const resetMs = e.resetAt ? Date.parse(e.resetAt) : NaN;
+    const resetKey = Number.isNaN(resetMs) ? '' : Math.floor(resetMs / 1000);
+    const key = [e.agent, e.title || '', planNorm, resetKey].join('|');
     const prev = byContent.get(key);
     if (!prev) { byContent.set(key, e); continue; }
     // escolhe a melhor: valor bom > stale menor > fetchedAt maior.
@@ -817,7 +969,9 @@ function detectReset(prevState, entries, now, threshold) {
 if (typeof module !== 'undefined') module.exports = {
   parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits, parseAntigravityTier, parseAntigravityQuota,
   readClaudeUsage, readGlmUsage, readCodexUsage, readAntigravityUsage, collectUsage, parseEnviron,
-  findCodexRollout, lastCodexRateLimits, mergeUsage, isSummaryEntry, detectReset,
-  USAGE_STALE_MS, USAGE_DROP_MS,
-  _clearGlmCache, _clearClaudeCache, _clearCodexCache, _httpsGetJson, CLAUDE_TIER_LABEL,
+  findCodexRollout, lastCodexRateLimits, mergeUsage, isSummaryEntry, detectReset, parseRetryAfter,
+  USAGE_STALE_MS, USAGE_DROP_MS, CLAUDE_429_COOLDOWN_MS, CLAUDE_CACHE_MS,
+  CLAUDE_429_BACKOFF_FACTOR, CLAUDE_429_MAX_BACKOFF_MS,
+  _clearGlmCache, _clearClaudeCache, _clearCodexCache, _httpsGetJson, CLAUDE_TIER_LABEL, CLAUDE_ORG_LABEL,
+  readClaudeCreds, claudePlanFromCreds,
 };

@@ -8,7 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Botão "atualizar uso agora" (⟳)** no header do overlay. Força a recoleta na
+  hora (fura o cache de conveniência de 5 min). É **seguro**: respeita o cooldown
+  do 429 — durante a janela de rate limit o botão fica apagado com tooltip
+  "aguarde Xmin" e **não** bate na API (evita re-escalar a penalidade).
+- **Tile de uso "Extra" (overage)** para contas com crédito extra medido em
+  dinheiro (`extra_usage` da API — Team/Enterprise/Pro com limite mensal). Mostra
+  o % e o valor gasto/limite (ex.: `$50.4/$50.0`), respeitando a moeda e as casas
+  decimais (`decimal_places`) do payload.
+
 ### Changed
+- **Plano do Claude resolvido pelas credenciais** (`~/.claude/.credentials.json`:
+  `rateLimitTier`/`subscriptionType`) antes do `.claude.json`. As credenciais
+  trazem o tier REAL (ex.: `default_claude_max_5x`) enquanto o `.claude.json` pode
+  ter um tier interno opaco (`default_raven`) — assim o rótulo fica preciso
+  ("Claude Max 5×") em vez do genérico.
+
 ### Fixed
 - **Overlay caía para trás ao clicar fora.** No Mutter/XWayland o estado
   `_NET_WM_STATE_ABOVE` oscilava ao perder o foco: clicar em outra janela ou no
@@ -16,6 +31,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (únicos pontos que reafirmavam o `alwaysOnTop`). Agora `win.on('blur')` reafirma
   `setAlwaysOnTop(true, 'screen-saver')` + `moveTop()` — mesmo padrão do toggle/reveal.
   Complementa o raise explícito da v0.6.7.
+- **Consumo do Claude sumia do overlay.** Duas causas combinadas: (1) contas que
+  não são Claude Max (ex.: **Team**, tier interno `default_raven`) não eram
+  reconhecidas — o rótulo do plano virava `null` e o tile desaparecia; agora
+  `parseClaudeConfig` reconhece `claude_team`/`claude_pro`/`claude_enterprise` e
+  cai num rótulo genérico "Claude" para qualquer conta presente mas não mapeada.
+  (2) Ao levar **HTTP 429** (rate limit) da API de uso, o loop de 60 s rebatia na
+  mesma janela e **renovava a penalidade** indefinidamente — o `%` nunca voltava.
+  Agora um 429 agenda um **cooldown** que respeita o header `Retry-After` (ou 15
+  min de fallback): durante ele o coletor não bate na API e mantém o último valor
+  conhecido (ou o plano-só), sem sumir nem piscar ⚠. Além disso, o Claude passou a
+  ter **cache próprio de 5 min** (a API é fortemente rate-limited e as janelas são
+  de 5h/7d — não faz sentido consultar a cada 60 s). O cooldown é **persistido em
+  disco** (`claude-cooldown.json`, só o timestamp — nunca o token), então rodar em
+  dev (`bun start`/restarts) não re-bate no boot nem **re-escala** o rate limit.
+  **Reset do plano no tile plano-só**: o `planLimitsEndDate` (ex.: reset semanal do
+  Claude Team) agora aparece mesmo sem a API OAuth — antes o tile mostrava o campo
+  de reset vazio. **Backoff exponencial**: o endpoint `/api/oauth/usage` é compartilhado com o
+  próprio Claude Code (`/status`) — limite agregado apertado. A cada 429 seguido, o
+  app alonga a espera (`Retry-After × 1.5^fails`, teto 1 h) em vez de rebater logo
+  que o `Retry-After` expira, dando espaço ao limite recuperar (bater de volta só
+  piorava a punição).
 
 ## [0.6.7] - 2026-07-09
 

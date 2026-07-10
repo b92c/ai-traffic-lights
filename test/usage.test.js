@@ -9,7 +9,8 @@ const {
   parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits,
   parseAntigravityTier, parseAntigravityQuota,
   lastCodexRateLimits, readClaudeUsage, readGlmUsage, readCodexUsage, readAntigravityUsage,
-  collectUsage, parseEnviron, mergeUsage, detectReset, _clearGlmCache, _clearClaudeCache, _clearCodexCache,
+  collectUsage, parseEnviron, mergeUsage, detectReset, parseRetryAfter,
+  _clearGlmCache, _clearClaudeCache, _clearCodexCache,
 } = require('../src/usage');
 
 // now fixo = 2026-07-07T12:00:00Z → testes determinísticos (mês é 0-indexed em JS: 6=Jul).
@@ -66,6 +67,23 @@ test('parseClaudeConfig: tier 20x e sem passes', () => {
 test('parseClaudeConfig: só organizationType (sem tier) → "Claude Max"', () => {
   const cfg = { oauthAccount: { organizationType: 'claude_max' } };
   assert.equal(parseClaudeConfig(cfg, NOW).plan, 'Claude Max');
+});
+
+test('parseClaudeConfig: organizationType claude_team → "Claude Team"', () => {
+  const cfg = { oauthAccount: { organizationType: 'claude_team' } };
+  assert.equal(parseClaudeConfig(cfg, NOW).plan, 'Claude Team');
+});
+
+test('parseClaudeConfig: tier desconhecido (default_raven) mas org presente → "Claude" genérico (não some)', () => {
+  // Regressão do "créditos do Claude sumiram": conta virou team/tier opaco que
+  // não mapeamos → antes plan ficava null e o tile desaparecia. Agora: rótulo
+  // genérico enquanto houver QUALQUER campo de identidade da conta.
+  const cfg = { oauthAccount: { organizationType: 'unknown_kind', organizationRateLimitTier: 'default_raven', emailAddress: 'x@y.com' } };
+  assert.equal(parseClaudeConfig(cfg, NOW).plan, 'Claude');
+});
+
+test('parseClaudeConfig: sem oauthAccount → plan null (sem conta, some do overlay)', () => {
+  assert.equal(parseClaudeConfig({ cachedGrowthBookFeatures: {} }, NOW).plan, null);
 });
 
 test('parseClaudeConfig: payload vazio/malformado → tudo null', () => {
@@ -157,6 +175,33 @@ test('parseAnthropicUsage: extrai janelas 5h e 7d com utilization + resets_at', 
   assert.equal(out[1].usedPct, 78);
 });
 
+test('parseAnthropicUsage: extra_usage (overage) vira tile "Extra" com % e valor ($ minor units)', () => {
+  // payload REAL da conta Team (capturado 2026-07-10): used_credits/monthly_limit
+  // em centavos (decimal_places:2). 5042/5000 = $50.42/$50.00, 100%.
+  const payload = {
+    five_hour: { utilization: 7, resets_at: '2026-07-07T17:00:00Z' },
+    extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 5042, utilization: 100, currency: 'USD', decimal_places: 2 },
+  };
+  const out = parseAnthropicUsage(payload, NOW);
+  assert.equal(out.length, 2);
+  const extra = out.find((w) => w.title === 'Extra');
+  assert.ok(extra, 'tile Extra presente');
+  assert.equal(extra.usedPct, 100);
+  assert.equal(extra.extra, '$50.4/$50.0');
+});
+
+test('parseAnthropicUsage: extra_usage desabilitado ou sem limite → não vira tile', () => {
+  assert.equal(parseAnthropicUsage({ extra_usage: { is_enabled: false, monthly_limit: 5000, used_credits: 10 } }, NOW).length, 0);
+  assert.equal(parseAnthropicUsage({ extra_usage: { is_enabled: true, monthly_limit: 0 } }, NOW).length, 0);
+});
+
+test('parseAnthropicUsage: extra_usage sem utilization → % derivado de used/limit', () => {
+  const out = parseAnthropicUsage({ extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 2500, currency: 'USD', decimal_places: 2 } }, NOW);
+  assert.equal(out[0].title, 'Extra');
+  assert.equal(out[0].usedPct, 50);              // 2500/5000
+  assert.equal(out[0].extra, '$25.0/$50.0');
+});
+
 test('parseAnthropicUsage: janela ausente/sem utilization é pulada; clampa >100', () => {
   const out = parseAnthropicUsage({ five_hour: { utilization: 150 }, seven_day: null }, NOW);
   assert.equal(out.length, 1);
@@ -164,6 +209,26 @@ test('parseAnthropicUsage: janela ausente/sem utilization é pulada; clampa >100
   assert.equal(out[0].resetAt, null);
   assert.deepEqual(parseAnthropicUsage(null, NOW), []);
   assert.deepEqual(parseAnthropicUsage({}, NOW), []);
+});
+
+// =========================== parseRetryAfter (backoff do 429) ===========================
+
+test('parseRetryAfter: delta-seconds ("1007") → ms', () => {
+  assert.equal(parseRetryAfter('1007', NOW), 1007 * 1000);
+  assert.equal(parseRetryAfter('0', NOW), 0);
+});
+
+test('parseRetryAfter: HTTP-date → ms até a data (nunca negativo)', () => {
+  const future = new Date(NOW + 5 * 60_000).toUTCString();
+  assert.equal(parseRetryAfter(future, NOW), 5 * 60_000);
+  const past = new Date(NOW - 60_000).toUTCString();
+  assert.equal(parseRetryAfter(past, NOW), 0);       // passado → 0, não negativo
+});
+
+test('parseRetryAfter: ausente/ilegível → null', () => {
+  assert.equal(parseRetryAfter(null, NOW), null);
+  assert.equal(parseRetryAfter(undefined, NOW), null);
+  assert.equal(parseRetryAfter('lixo', NOW), null);
 });
 
 // =========================== readClaudeUsage (I/O + OAuth) ===========================
@@ -201,6 +266,31 @@ test('readClaudeUsage: OAuth ok → 2 linhas (5h + 7d) com % e reset reais', asy
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+test('claudePlanFromCreds: tier Max conhecido vence; senão subscriptionType', () => {
+  const { claudePlanFromCreds } = require('../src/usage');
+  assert.equal(claudePlanFromCreds({ rateLimitTier: 'default_claude_max_5x' }), 'Claude Max 5×');
+  assert.equal(claudePlanFromCreds({ subscriptionType: 'team', rateLimitTier: 'default_raven' }), 'Claude Team');
+  assert.equal(claudePlanFromCreds({ subscriptionType: 'enterprise' }), 'Claude Enterprise');
+  assert.equal(claudePlanFromCreds({}), null);   // sem info → null (caller usa .claude.json)
+});
+
+test('readClaudeUsage: extra_usage vira tile id=claude-extra (não colide com 7d)', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  const f = mockFetcher({
+    five_hour: { utilization: 7, resets_at: '2026-07-07T17:00:00Z' },
+    seven_day: { utilization: 24, resets_at: '2026-07-09T12:00:00Z' },
+    extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 5042, utilization: 100, currency: 'USD', decimal_places: 2 },
+  });
+  const r = await readClaudeUsage({ home: tmp, now: NOW, fetcher: f });
+  const ids = r.map((e) => e.id).sort();
+  assert.deepEqual(ids, ['claude-5h', 'claude-7d', 'claude-extra'], 'três ids distintos (Extra não colide)');
+  const extra = r.find((e) => e.id === 'claude-extra');
+  assert.equal(extra.usedPct, 100);
+  assert.equal(extra.extra, '$50.4/$50.0');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test('readClaudeUsage: sem token OAuth → fallback plano-só (1 linha, sem %)', async () => {
   _clearClaudeCache();
   const tmp = claudeHome({ token: null });
@@ -210,6 +300,27 @@ test('readClaudeUsage: sem token OAuth → fallback plano-só (1 linha, sem %)',
   assert.equal(r[0].plan, 'Claude Max 5×');
   assert.equal(r[0].usedPct, null);
   assert.equal(r[0].source, 'claude.json');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: plano-só NÃO mostra planLimitsEndDate como reset (é fim do ciclo do plano, não da janela)', async () => {
+  // planLimitsEndDate (ex.: Jul 13) é o fim do ciclo do PLANO, não o reset da
+  // janela de uso 5h/7d (que reseta várias vezes até lá). Pô-lo no tile enganava
+  // ("3d" logo após a janela resetar). Sem a API OAuth → honestamente sem reset.
+  _clearClaudeCache();
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'atl-'));
+  fs.writeFileSync(path.join(tmp, '.claude.json'), JSON.stringify({
+    oauthAccount: { organizationType: 'claude_team', organizationRateLimitTier: 'default_raven' },
+    cachedGrowthBookFeatures: { tengu_saffron_lattice: { planLimitsEndDate: '2026-07-13T07:00:00Z' } },
+    passesLastSeenRemaining: 2,
+  }));
+  const r = await readClaudeUsage({ home: tmp, now: NOW });   // sem token → plano-só
+  assert.equal(r[0].id, 'claude-plan');
+  assert.equal(r[0].plan, 'Claude Team');
+  assert.equal(r[0].resetAt, null, 'NÃO expõe planLimitsEndDate como reset da janela');
+  assert.equal(r[0].resetInMin, null);
+  assert.equal(r[0].usedPct, null);                           // % só vem da API (honesto)
+  assert.equal(r[0].extra, '2 passes');                       // passes é info local legítima
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -228,6 +339,171 @@ test('readClaudeUsage: sem plano nem token → null', async () => {
   _clearClaudeCache();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'atl-')); // vazio
   assert.equal(await readClaudeUsage({ home: tmp, now: NOW }), null);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// fetcher que sempre lança 429 (com Retry-After em ms), contando chamadas.
+function fetcher429(retryAfterMs) {
+  const calls = [];
+  const fn = async (url, headers) => {
+    calls.push({ url, headers });
+    const e = new Error('HTTP 429');
+    e.statusCode = 429;
+    if (retryAfterMs != null) e.retryAfterMs = retryAfterMs;
+    throw e;
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+test('readClaudeUsage: 429 → cooldown NÃO rebate na API durante o Retry-After (bug do "Claude sumiu")', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  const f = fetcher429(20 * 60_000);                 // Retry-After 20 min
+  // 1ª coleta leva 429 → cai no plano-só e agenda o cooldown.
+  const r1 = await readClaudeUsage({ home: tmp, now: NOW, fetcher: f });
+  assert.equal(r1.length, 1);
+  assert.equal(r1[0].id, 'claude-plan');             // tile NÃO some
+  assert.equal(f.calls.length, 1);
+  // +60s: passou do cache (30s) MAS ainda no cooldown → não bate na API de novo.
+  const r2 = await readClaudeUsage({ home: tmp, now: NOW + 60_000, fetcher: f });
+  assert.equal(r2[0].id, 'claude-plan');
+  assert.equal(f.calls.length, 1, 'não deve rebater na API durante o cooldown do 429');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: 429 sem Retry-After usa cooldown padrão (15 min)', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  const f = fetcher429(null);                        // sem header legível
+  await readClaudeUsage({ home: tmp, now: NOW, fetcher: f });
+  // +10min < 15min padrão → ainda em cooldown, sem nova chamada.
+  await readClaudeUsage({ home: tmp, now: NOW + 10 * 60_000, fetcher: f });
+  assert.equal(f.calls.length, 1);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: 429 mantém o ÚLTIMO valor bom (não regride pro plano-só)', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  // 1ª: OK → 2 janelas reais. 2ª: 429 → deve segurar as janelas boas, não sumir %.
+  let n = 0;
+  const f = async () => {
+    n += 1;
+    if (n === 1) return JSON.stringify({ five_hour: { utilization: 42, resets_at: '2026-07-07T17:00:00Z' }, seven_day: { utilization: 80, resets_at: '2026-07-09T12:00:00Z' } });
+    const e = new Error('HTTP 429'); e.statusCode = 429; e.retryAfterMs = 20 * 60_000; throw e;
+  };
+  const r1 = await readClaudeUsage({ home: tmp, now: NOW, fetcher: f });
+  assert.equal(r1.length, 2);
+  assert.equal(r1[0].usedPct, 42);
+  // +60s: cache expirou → tenta, leva 429 → mantém as 2 janelas boas anteriores.
+  const r2 = await readClaudeUsage({ home: tmp, now: NOW + 60_000, fetcher: f });
+  assert.equal(r2.length, 2, 'segura as janelas boas em vez de cair pro plano-só');
+  assert.equal(r2[0].usedPct, 42);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: cache próprio de 5min (não rebate em +60s, ao contrário do GLM 30s)', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  const f = mockFetcher({ five_hour: { utilization: 30, resets_at: '2026-07-07T17:00:00Z' } });
+  await readClaudeUsage({ home: tmp, now: NOW, fetcher: f });
+  await readClaudeUsage({ home: tmp, now: NOW + 60_000, fetcher: f });   // +60s < 5min
+  await readClaudeUsage({ home: tmp, now: NOW + 4 * 60_000, fetcher: f }); // +4min < 5min
+  assert.equal(f.calls.length, 1, 'cache de 5min evita rebater a cada tick de 60s');
+  // +6min > 5min → cache expira, rebate.
+  await readClaudeUsage({ home: tmp, now: NOW + 6 * 60_000, fetcher: f });
+  assert.equal(f.calls.length, 2);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: cooldownUntil injetado (persistido) bloqueia a chamada mesmo com cache vazio', async () => {
+  _clearClaudeCache();                                 // simula processo recém-iniciado (bun start)
+  const tmp = claudeHome({ token: 'tok' });
+  const f = fetcher429(20 * 60_000);
+  // cooldown veio do disco (futuro) → NÃO deve bater na API no boot (anti-reescalada).
+  const r = await readClaudeUsage({ home: tmp, now: NOW, fetcher: f, cooldownUntil: NOW + 10 * 60_000 });
+  assert.equal(f.calls.length, 0, 'cooldown persistido evita re-bater no boot e re-escalar o 429');
+  assert.equal(r[0].id, 'claude-plan');                // cai no plano-só (cache vazio)
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: 429 chama setCooldown com {until, fails} p/ persistir', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  const f = fetcher429(20 * 60_000);
+  let saved = null;
+  await readClaudeUsage({ home: tmp, now: NOW, fetcher: f, setCooldown: (o) => { saved = o; } });
+  assert.deepEqual(saved, { until: NOW + 20 * 60_000, fails: 1 }, 'persistiu {until=Retry-After, fails=1}');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: 429 seguidos aplicam backoff exponencial (Retry-After × 1.5^fails)', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  const f = fetcher429(10 * 60_000);                 // Retry-After fixo 10min
+  let saved = null;
+  // 1ª falha: fails 0→1, backoff = 10min × 1.5^0 = 10min
+  await readClaudeUsage({ home: tmp, now: NOW, fetcher: f, setCooldown: (o) => { saved = o; } });
+  assert.equal(saved.until, NOW + 10 * 60_000, '1ª falha: sem multiplicar ainda');
+  assert.equal(saved.fails, 1);
+  // 2ª falha (fails=1 injetado do disco): backoff = 10min × 1.5^1 = 15min
+  await readClaudeUsage({ home: tmp, now: NOW + 11 * 60_000, fetcher: f, cooldownFails: 1, setCooldown: (o) => { saved = o; } });
+  assert.equal(saved.until, NOW + 11 * 60_000 + 15 * 60_000, '2ª falha: ×1.5 = 15min');
+  assert.equal(saved.fails, 2);
+  // 3ª falha (fails=2): backoff = 10min × 1.5^2 = 22.5min
+  await readClaudeUsage({ home: tmp, now: NOW + 30 * 60_000, fetcher: f, cooldownFails: 2, setCooldown: (o) => { saved = o; } });
+  assert.equal(saved.until, NOW + 30 * 60_000 + Math.round(10 * 60_000 * 1.5 * 1.5), '3ª falha: ×2.25');
+  assert.equal(saved.fails, 3);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: 429 respeita o teto de backoff (1h)', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  const f = fetcher429(30 * 60_000);                 // Retry-After 30min
+  let saved = null;
+  // fails=10 injetado: 30min × 1.5^10 = imenso → clampado no teto de 1h
+  await readClaudeUsage({ home: tmp, now: NOW, fetcher: f, cooldownFails: 10, setCooldown: (o) => { saved = o; } });
+  assert.equal(saved.until, NOW + 60 * 60_000, 'clampado no teto de 1h');
+  assert.equal(saved.fails, 11);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: sucesso zera o contador de backoff (fails=0)', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  let n = 0;
+  const f = async () => {
+    n += 1;
+    if (n === 1) { const e = new Error('HTTP 429'); e.statusCode = 429; e.retryAfterMs = 5 * 60_000; throw e; }
+    return JSON.stringify({ five_hour: { utilization: 9, resets_at: '2026-07-07T17:00:00Z' } });
+  };
+  let saved = null;
+  await readClaudeUsage({ home: tmp, now: NOW, fetcher: f, cooldownFails: 0, setCooldown: (o) => { saved = o; } });
+  assert.equal(saved.fails, 1, 'falhou → armou fails=1');
+  // depois de expirar, sucesso → zera
+  await readClaudeUsage({ home: tmp, now: NOW + 6 * 60_000, fetcher: f, cooldownFails: 1, setCooldown: (o) => { saved = o; } });
+  assert.deepEqual(saved, { until: 0, fails: 0 }, 'sucesso zera o backoff persistido');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: após o cooldown expirar, rebate na API e recupera o %', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  let n = 0;
+  const f = async () => {
+    n += 1;
+    if (n === 1) { const e = new Error('HTTP 429'); e.statusCode = 429; e.retryAfterMs = 5 * 60_000; throw e; }
+    return JSON.stringify({ five_hour: { utilization: 12, resets_at: '2026-07-07T17:00:00Z' } });
+  };
+  const r1 = await readClaudeUsage({ home: tmp, now: NOW, fetcher: f });
+  assert.equal(r1[0].id, 'claude-plan');             // 429 → plano-só
+  // +6min: cooldown (5min) já expirou → bate de novo e pega o % real.
+  const r2 = await readClaudeUsage({ home: tmp, now: NOW + 6 * 60_000, fetcher: f });
+  assert.equal(r2[0].id, 'claude-5h');
+  assert.equal(r2[0].usedPct, 12);
+  assert.equal(n, 2, 'rebateu na API após o cooldown');
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -670,6 +946,16 @@ test('mergeUsage: token inválido (summary sem %) some quando há concreto do me
   const out = mergeUsage([], [bad, good], NOW);
   assert.equal(out.length, 1);
   assert.equal(out[0].id, 'glm-tokens'); // o summary fantasma sumiu
+});
+
+test('mergeUsage: mesma conta por 2 credenciais com resetAt differing 1ms → colapsa (bug "mês 2×")', () => {
+  // Regressão real: a mesma conta z.ai Pro chega por 2 tokens (sufixos 6baca3 e
+  // c3c374); a API devolve resetAt com ~1ms de diferença ("...09.995Z" vs
+  // "...09.996Z"). A chave de dedup via resetAt exato não cola → "MCP (mês) 2×".
+  const a = { id: 'glm-month:6baca3', agent: 'glm', title: 'MCP (mês)', plan: 'GLM Pro (z.ai)', usedPct: 0, resetAt: '2026-08-10T11:47:09.995Z', error: null };
+  const b = { id: 'glm-month:c3c374', agent: 'glm', title: 'MCP (mês)', plan: 'GLM Pro (z.ai)', usedPct: 0, resetAt: '2026-08-10T11:47:09.996Z', error: null };
+  const out = mergeUsage([], [a, b], NOW);
+  assert.equal(out.length, 1, 'o mensal duplicado (1ms de diferença) colapsa em 1 linha');
 });
 
 test('mergeUsage: antigravity-plan limpa antigravity-quota do cache anterior', () => {

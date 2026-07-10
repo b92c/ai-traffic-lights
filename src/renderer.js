@@ -36,6 +36,7 @@ const $usage = document.getElementById('usage');
 const $ver = document.getElementById('verBtn');
 const $toggleList = document.getElementById('toggleListBtn');
 const $toggleFooter = document.getElementById('toggleFooterBtn');
+const $forceUsage = document.getElementById('forceUsageBtn');
 const $summaryLed = document.getElementById('summaryLed');
 const $expand = document.getElementById('expandBtn');
 const $quit = document.getElementById('quitBtn');
@@ -639,6 +640,31 @@ if ($toggleFooter) $toggleFooter.addEventListener('click', () => {
   persistUI({ showUsage: !footerShowsUsage() });
   applyFooterMode();
 });
+// Force (⟳): recoleta o uso na hora (fura o cache de conveniência; o cooldown do
+// 429 continua respeitado no main). Gira o ícone ~600ms como feedback — o push
+// de 'usage' chega logo depois e re-renderiza os tiles.
+let claudeCooldownUntil = 0;
+function applyUsageMeta(meta) {
+  claudeCooldownUntil = (meta && typeof meta.claudeCooldownUntil === 'number') ? meta.claudeCooldownUntil : 0;
+  if (!$forceUsage) return;
+  if (claudeCooldownUntil > Date.now()) {
+    const min = Math.ceil((claudeCooldownUntil - Date.now()) / 60000);
+    $forceUsage.setAttribute('data-tip', T('tooltip_force_cooldown', { min }));
+    $forceUsage.classList.add('is-cooldown');
+  } else {
+    $forceUsage.setAttribute('data-tip', T('tooltip_force_usage'));
+    $forceUsage.classList.remove('is-cooldown');
+  }
+}
+if ($forceUsage) $forceUsage.addEventListener('click', () => {
+  // Bloqueado durante o cooldown do 429: recoletar não traria % novo (o coletor
+  // respeita o cooldown) e o spinner daria falsa impressão de atualização. O
+  // tooltip já explica "aguarde Xmin"; aqui só não dispara nada.
+  if (claudeCooldownUntil > Date.now()) return;
+  window.trafficLight.forceUsage();
+  $forceUsage.classList.add('is-spinning');
+  setTimeout(() => $forceUsage.classList.remove('is-spinning'), 600);
+});
 
 // Botão de versão: ramifica por estado. available → baixar (AppImage) ou abrir
 // release (demais); ready → reiniciar e instalar; idle/error → "verificar agora".
@@ -673,6 +699,7 @@ window.trafficLight.getLang().then((l) => { T = makeT(l || 'en'); applyStaticI18
 window.trafficLight.onSessions((s) => { sessions = s || []; render(); });
 window.trafficLight.requestSessions();
 window.trafficLight.onUsage((u) => { usageEntries = Array.isArray(u) ? u : []; applyFooterMode(); });
+window.trafficLight.onUsageMeta((m) => applyUsageMeta(m));
 window.trafficLight.requestUsage();
 window.trafficLight.getVersion().then((v) => { appVersion = v || ''; renderVersion(); });
 window.trafficLight.getUpdate().then((i) => { updateInfo = i || null; renderVersion(); });

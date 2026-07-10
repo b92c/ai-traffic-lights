@@ -57,6 +57,7 @@ const BOUNDS_FILE = path.join(BASE_DIR, 'window.json'); // {x, y, width}
 const ALIASES_FILE = path.join(BASE_DIR, 'aliases.json'); // {cwd: apelido}
 const SETTINGS_FILE = path.join(BASE_DIR, 'settings.json'); // {idleThresholdSec, escalateIdle, shortcut}
 const USAGE_FILE = path.join(BASE_DIR, 'usage.json'); // último uso conhecido (sobrevive a reinício; mostrado stale até refrescar)
+const CLAUDE_COOLDOWN_FILE = path.join(BASE_DIR, 'claude-cooldown.json'); // {until:<ms>} — cooldown do 429 da API de uso (SÓ o timestamp, nunca o token)
 const SETTINGS_BOUNDS_FILE = path.join(BASE_DIR, 'settings-window.json'); // {x, y, width, height}
 const AUTOSTART_FILE = path.join(process.env.HOME, '.config/autostart/ai-traffic-lights.desktop');
 
@@ -981,6 +982,27 @@ function saveUsage() {
 }
 let lastUsage = loadUsage();
 
+// Cooldown do 429 da API de uso do Claude, PERSISTIDO em disco (com o contador
+// de falhas p/ o backoff exponencial). Sem isto, rodar em dev (`bun start`/
+// restarts) perde o estado a cada reinício, re-bate no boot e RE-ESCALA o rate
+// limit. Grava só {until, fails} — NUNCA o token. Nunca lança.
+function loadClaudeCooldown() {
+  try {
+    const o = JSON.parse(fs.readFileSync(CLAUDE_COOLDOWN_FILE, 'utf8'));
+    const until = (o && typeof o.until === 'number' && o.until > Date.now()) ? o.until : 0;
+    const fails = (o && typeof o.fails === 'number' && o.fails > 0) ? o.fails : 0;
+    return { until, fails };
+  } catch { return { until: 0, fails: 0 }; }
+}
+function saveClaudeCooldown({ until, fails } = {}) {
+  claudeCooldownUntil = until || 0;
+  claudeCooldownFails = fails || 0;
+  try { fs.writeFileSync(CLAUDE_COOLDOWN_FILE, JSON.stringify({ until: claudeCooldownUntil, fails: claudeCooldownFails })); } catch { /* ignore */ }
+}
+const _cd0 = loadClaudeCooldown();
+let claudeCooldownUntil = _cd0.until;
+let claudeCooldownFails = _cd0.fails;
+
 // Credenciais do GLM vivem no AMBIENTE DE CADA TERMINAL (o usuário tem terminais
 // Claude/Anthropic e terminais Claude/GLM — z.ai), possivelmente com CONTAS
 // z.ai DIFERENTES em terminais diferentes. Não estão em dotfile nem globais.
@@ -1116,13 +1138,22 @@ async function collectAndSendUsage() {
     // credencial dele consulta a MESMA API de quota — mescla (dedup por token).
     glmCreds = mergeGlmCreds(glmCreds, opencodeGlmCreds());
     const codexCwds = codexCwdsFromSessions();
-    const entries = await usage.collectUsage({ glmCreds, codexCwds, home: app.getPath('home') });
+    const entries = await usage.collectUsage({
+      glmCreds, codexCwds, home: app.getPath('home'),
+      // cooldown do 429 persistido: não rebate na API enquanto vigente; o coletor
+      // chama de volta setCooldown quando leva um 429 novo (grava {until, fails}).
+      claudeCooldownUntil: claudeCooldownUntil,
+      claudeCooldownFails: claudeCooldownFails,
+      claudeSetCooldown: saveClaudeCooldown,
+    });
     // Funde com o último estado: mantém o valor bom de cada linha se a coleta
     // atual falhou pra ela (evita zerar/sumir); esmaece pra cinza (stale) após
     // alguns min sem atualização em vez de piscar. Ver usage.mergeUsage.
     if (Array.isArray(entries)) { lastUsage = usage.mergeUsage(lastUsage, entries); saveUsage(); maybeNotifyReset(); }
   } catch { /* collectUsage já engole erros internamente; defeção dupla */ }
   sendToRenderer('usage', lastUsage);
+  // meta p/ a UI: o cooldown do 429 (se vigente) alimenta o tooltip do botão ⟳.
+  sendToRenderer('usage-meta', { claudeCooldownUntil: claudeCooldownUntil > Date.now() ? claudeCooldownUntil : 0, claudeCooldownFails: claudeCooldownUntil > Date.now() ? claudeCooldownFails : 0 });
 }
 
 // Estado (por id) que detectReset usa entre coletas p/ achar a transição
@@ -1149,6 +1180,24 @@ function maybeNotifyReset() {
 }
 ipcMain.on('request-usage', () => {
   sendToRenderer('usage', lastUsage);
+  sendToRenderer('usage-meta', { claudeCooldownUntil: claudeCooldownUntil > Date.now() ? claudeCooldownUntil : 0, claudeCooldownFails: claudeCooldownUntil > Date.now() ? claudeCooldownFails : 0 });
+});
+
+// Force (botão ⟳): fura o cache de CONVENIÊNCIA (5min Claude / 30s GLM) e
+// recoleta na hora. NÃO fura o cooldown do 429 — esse vive no disco e é injetado
+// em collectUsage, então mesmo com o cache limpo o coletor não re-bate durante a
+// janela de rate limit (evita re-escalar). É "atualizar já", não "ignorar limite".
+ipcMain.on('force-usage', () => {
+  try {
+    // Durante cooldown ativo NÃO limpa o cache do Claude: ele guarda o último
+    // valor bom que readClaudeUsage usa como fallback. Limpá-lo faria o tile
+    // regredir p/ plano-só (perder o %) só porque o usuário clicou ⟳ no rate
+    // limit. Fora do cooldown, limpa normalmente p/ forçar recoleta real.
+    if (!(claudeCooldownUntil > Date.now())) usage._clearClaudeCache();
+    usage._clearGlmCache();
+    usage._clearCodexCache();
+  } catch { /* ignore */ }
+  collectAndSendUsage();
 });
 
 // ---- update checker (versão + release mais nova do GitHub) ----
