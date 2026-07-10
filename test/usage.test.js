@@ -330,6 +330,41 @@ test('readClaudeUsage: 429 mantém o ÚLTIMO valor bom (não regride pro plano-s
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+test('readClaudeUsage: cache próprio de 5min (não rebate em +60s, ao contrário do GLM 30s)', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  const f = mockFetcher({ five_hour: { utilization: 30, resets_at: '2026-07-07T17:00:00Z' } });
+  await readClaudeUsage({ home: tmp, now: NOW, fetcher: f });
+  await readClaudeUsage({ home: tmp, now: NOW + 60_000, fetcher: f });   // +60s < 5min
+  await readClaudeUsage({ home: tmp, now: NOW + 4 * 60_000, fetcher: f }); // +4min < 5min
+  assert.equal(f.calls.length, 1, 'cache de 5min evita rebater a cada tick de 60s');
+  // +6min > 5min → cache expira, rebate.
+  await readClaudeUsage({ home: tmp, now: NOW + 6 * 60_000, fetcher: f });
+  assert.equal(f.calls.length, 2);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: cooldownUntil injetado (persistido) bloqueia a chamada mesmo com cache vazio', async () => {
+  _clearClaudeCache();                                 // simula processo recém-iniciado (bun start)
+  const tmp = claudeHome({ token: 'tok' });
+  const f = fetcher429(20 * 60_000);
+  // cooldown veio do disco (futuro) → NÃO deve bater na API no boot (anti-reescalada).
+  const r = await readClaudeUsage({ home: tmp, now: NOW, fetcher: f, cooldownUntil: NOW + 10 * 60_000 });
+  assert.equal(f.calls.length, 0, 'cooldown persistido evita re-bater no boot e re-escalar o 429');
+  assert.equal(r[0].id, 'claude-plan');                // cai no plano-só (cache vazio)
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: 429 chama setCooldown com o timestamp p/ persistir', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  const f = fetcher429(20 * 60_000);
+  let saved = null;
+  await readClaudeUsage({ home: tmp, now: NOW, fetcher: f, setCooldown: (until) => { saved = until; } });
+  assert.equal(saved, NOW + 20 * 60_000, 'persistiu o cooldownUntil (Retry-After) via callback');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test('readClaudeUsage: após o cooldown expirar, rebate na API e recupera o %', async () => {
   _clearClaudeCache();
   const tmp = claudeHome({ token: 'tok' });

@@ -25,7 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mesma janela e **renovava a penalidade** indefinidamente — o `%` nunca voltava.
   Agora um 429 agenda um **cooldown** que respeita o header `Retry-After` (ou 15
   min de fallback): durante ele o coletor não bate na API e mantém o último valor
-  conhecido (ou o plano-só), sem sumir nem piscar ⚠.
+  conhecido (ou o plano-só), sem sumir nem piscar ⚠. O cooldown é **persistido em
+  disco** (`claude-cooldown.json`, só o timestamp — nunca o token), então rodar em
+  dev (`bun start`/restarts) não re-bate no boot nem **re-escala** o rate limit.
+  Além disso, o Claude passou a ter **cache próprio de 5 min** (a API é fortemente
+  rate-limited e as janelas são de 5h/7d — não faz sentido consultar a cada 60 s).
 
 ## [0.6.7] - 2026-07-09
 

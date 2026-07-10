@@ -57,6 +57,7 @@ const BOUNDS_FILE = path.join(BASE_DIR, 'window.json'); // {x, y, width}
 const ALIASES_FILE = path.join(BASE_DIR, 'aliases.json'); // {cwd: apelido}
 const SETTINGS_FILE = path.join(BASE_DIR, 'settings.json'); // {idleThresholdSec, escalateIdle, shortcut}
 const USAGE_FILE = path.join(BASE_DIR, 'usage.json'); // último uso conhecido (sobrevive a reinício; mostrado stale até refrescar)
+const CLAUDE_COOLDOWN_FILE = path.join(BASE_DIR, 'claude-cooldown.json'); // {until:<ms>} — cooldown do 429 da API de uso (SÓ o timestamp, nunca o token)
 const SETTINGS_BOUNDS_FILE = path.join(BASE_DIR, 'settings-window.json'); // {x, y, width, height}
 const AUTOSTART_FILE = path.join(process.env.HOME, '.config/autostart/ai-traffic-lights.desktop');
 
@@ -981,6 +982,22 @@ function saveUsage() {
 }
 let lastUsage = loadUsage();
 
+// Cooldown do 429 da API de uso do Claude, PERSISTIDO em disco. Sem isto, rodar
+// em dev (`bun start`/restarts) perde o cooldown em memória a cada reinício,
+// re-bate no boot e RE-ESCALA o rate limit (o servidor sobe o Retry-After a cada
+// toque). Grava só o timestamp {until} — NUNCA o token. Nunca lança.
+function loadClaudeCooldown() {
+  try {
+    const o = JSON.parse(fs.readFileSync(CLAUDE_COOLDOWN_FILE, 'utf8'));
+    return (o && typeof o.until === 'number' && o.until > Date.now()) ? o.until : 0;
+  } catch { return 0; }
+}
+function saveClaudeCooldown(until) {
+  claudeCooldownUntil = until;
+  try { fs.writeFileSync(CLAUDE_COOLDOWN_FILE, JSON.stringify({ until })); } catch { /* ignore */ }
+}
+let claudeCooldownUntil = loadClaudeCooldown();
+
 // Credenciais do GLM vivem no AMBIENTE DE CADA TERMINAL (o usuário tem terminais
 // Claude/Anthropic e terminais Claude/GLM — z.ai), possivelmente com CONTAS
 // z.ai DIFERENTES em terminais diferentes. Não estão em dotfile nem globais.
@@ -1116,7 +1133,13 @@ async function collectAndSendUsage() {
     // credencial dele consulta a MESMA API de quota — mescla (dedup por token).
     glmCreds = mergeGlmCreds(glmCreds, opencodeGlmCreds());
     const codexCwds = codexCwdsFromSessions();
-    const entries = await usage.collectUsage({ glmCreds, codexCwds, home: app.getPath('home') });
+    const entries = await usage.collectUsage({
+      glmCreds, codexCwds, home: app.getPath('home'),
+      // cooldown do 429 persistido: não rebate na API enquanto vigente; o coletor
+      // chama de volta setCooldown quando leva um 429 novo (grava o timestamp).
+      claudeCooldownUntil: claudeCooldownUntil,
+      claudeSetCooldown: saveClaudeCooldown,
+    });
     // Funde com o último estado: mantém o valor bom de cada linha se a coleta
     // atual falhou pra ela (evita zerar/sumir); esmaece pra cinza (stale) após
     // alguns min sem atualização em vez de piscar. Ver usage.mergeUsage.

@@ -240,7 +240,7 @@ function readClaudeOAuthToken({ home } = {}) {
 // na API: devolvemos o último valor bom conhecido, ou o plano-só. Assim o tile
 // não some nem pisca ⚠ e a janela de rate limit expira sozinha.
 const _claudeCacheByToken = new Map(); // token → { at, entries, cooldownUntil }
-async function readClaudeUsage({ home, now, fetcher } = {}) {
+async function readClaudeUsage({ home, now, fetcher, cooldownUntil, setCooldown } = {}) {
   const plan = claudePlanLabel({ home });
   const token = readClaudeOAuthToken({ home });
   const planOnly = plan
@@ -250,11 +250,12 @@ async function readClaudeUsage({ home, now, fetcher } = {}) {
 
   const nowMs = now || Date.now();
   const cached = _claudeCacheByToken.get(token);
-  if (cached && (nowMs - cached.at) < CACHE_MS) return cached.entries;
-  // Cooldown pós-429 ainda vigente → não rebate; devolve o último bom (ou plano-só).
-  if (cached && cached.cooldownUntil && nowMs < cached.cooldownUntil) {
-    return cached.entries || planOnly;
-  }
+  if (cached && (nowMs - cached.at) < CLAUDE_CACHE_MS) return cached.entries;
+  // Cooldown PERSISTIDO (injetado pelo main.js, sobrevive a restart): sem isto,
+  // `bun start`/dev perde o cooldown em memória a cada reinício, re-bate no boot
+  // e RE-ESCALA o 429 (o servidor sobe o Retry-After a cada toque). Não rebate.
+  const cd = Math.max(cached && cached.cooldownUntil || 0, cooldownUntil || 0);
+  if (cd && nowMs < cd) return (cached && cached.entries) || planOnly;
 
   const headers = {
     Authorization: 'Bearer ' + token,
@@ -271,8 +272,11 @@ async function readClaudeUsage({ home, now, fetcher } = {}) {
     if (e && e.statusCode === 429) {
       const retryMs = (typeof e.retryAfterMs === 'number' && e.retryAfterMs > 0)
         ? e.retryAfterMs : CLAUDE_429_COOLDOWN_MS;
+      const until = nowMs + retryMs;
       const keep = (cached && cached.entries) ? cached.entries : planOnly;
-      _claudeCacheByToken.set(token, { at: nowMs, entries: keep, cooldownUntil: nowMs + retryMs });
+      _claudeCacheByToken.set(token, { at: nowMs, entries: keep, cooldownUntil: until });
+      // Persiste o cooldown (só o timestamp, nunca o token) p/ sobreviver a restart.
+      if (typeof setCooldown === 'function') { try { setCooldown(until); } catch { /* nunca quebra a coleta */ } }
       return keep;
     }
     return planOnly; // token expirado/offline → plano-só (não polui com ⚠)
@@ -581,6 +585,10 @@ function _httpsGetJson(url, headers, fetcher, timeoutMs = 4000) {
 // não se sobrescrevem no cache. `label`/`suffix` distinguem contas na UI quando
 // há mais de uma (multi-conta); com 1 conta ficam vazios e o id fica canônico.
 const CACHE_MS = 30 * 1000;
+// O Claude tem cache PRÓPRIO e mais longo: a API /api/oauth/usage é fortemente
+// rate-limited (Retry-After ~1000s) e as janelas são de 5h/7d — o % mal muda em
+// minutos. 5 min = no máx. 12 req/h, tira a pressão do endpoint. (GLM segue 30s.)
+const CLAUDE_CACHE_MS = 5 * 60 * 1000; // 5 min
 // Cooldown padrão quando o 429 não traz Retry-After legível (fallback conservador).
 const CLAUDE_429_COOLDOWN_MS = 15 * 60 * 1000; // 15 min
 const _glmCacheByToken = new Map(); // token → { at, entries }
@@ -667,7 +675,10 @@ async function collectUsage(opts = {}) {
   // Claude usa opts.claudeFetcher (separado do de GLM: cada API tem schema/mock
   // próprio; em teste sem claudeFetcher e sem token, o Claude cai no plano-só).
   const [claude, antigravity, ...glm] = await Promise.all([
-    readClaudeUsage({ home: opts.home, now: opts.now, fetcher: opts.claudeFetcher }).catch(() => null),
+    readClaudeUsage({
+      home: opts.home, now: opts.now, fetcher: opts.claudeFetcher,
+      cooldownUntil: opts.claudeCooldownUntil, setCooldown: opts.claudeSetCooldown,
+    }).catch(() => null),
     Promise.resolve().then(() => readAntigravityUsage({ home: opts.home })).catch(() => null),
     ...creds.map((c) => readGlmUsage({
       env: c.env, now: opts.now, fetcher: opts.fetcher,
@@ -876,6 +887,6 @@ if (typeof module !== 'undefined') module.exports = {
   parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits, parseAntigravityTier, parseAntigravityQuota,
   readClaudeUsage, readGlmUsage, readCodexUsage, readAntigravityUsage, collectUsage, parseEnviron,
   findCodexRollout, lastCodexRateLimits, mergeUsage, isSummaryEntry, detectReset, parseRetryAfter,
-  USAGE_STALE_MS, USAGE_DROP_MS, CLAUDE_429_COOLDOWN_MS,
+  USAGE_STALE_MS, USAGE_DROP_MS, CLAUDE_429_COOLDOWN_MS, CLAUDE_CACHE_MS,
   _clearGlmCache, _clearClaudeCache, _clearCodexCache, _httpsGetJson, CLAUDE_TIER_LABEL, CLAUDE_ORG_LABEL,
 };
