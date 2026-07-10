@@ -9,7 +9,8 @@ const {
   parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits,
   parseAntigravityTier, parseAntigravityQuota,
   lastCodexRateLimits, readClaudeUsage, readGlmUsage, readCodexUsage, readAntigravityUsage,
-  collectUsage, parseEnviron, mergeUsage, detectReset, _clearGlmCache, _clearClaudeCache, _clearCodexCache,
+  collectUsage, parseEnviron, mergeUsage, detectReset, parseRetryAfter,
+  _clearGlmCache, _clearClaudeCache, _clearCodexCache,
 } = require('../src/usage');
 
 // now fixo = 2026-07-07T12:00:00Z → testes determinísticos (mês é 0-indexed em JS: 6=Jul).
@@ -66,6 +67,23 @@ test('parseClaudeConfig: tier 20x e sem passes', () => {
 test('parseClaudeConfig: só organizationType (sem tier) → "Claude Max"', () => {
   const cfg = { oauthAccount: { organizationType: 'claude_max' } };
   assert.equal(parseClaudeConfig(cfg, NOW).plan, 'Claude Max');
+});
+
+test('parseClaudeConfig: organizationType claude_team → "Claude Team"', () => {
+  const cfg = { oauthAccount: { organizationType: 'claude_team' } };
+  assert.equal(parseClaudeConfig(cfg, NOW).plan, 'Claude Team');
+});
+
+test('parseClaudeConfig: tier desconhecido (default_raven) mas org presente → "Claude" genérico (não some)', () => {
+  // Regressão do "créditos do Claude sumiram": conta virou team/tier opaco que
+  // não mapeamos → antes plan ficava null e o tile desaparecia. Agora: rótulo
+  // genérico enquanto houver QUALQUER campo de identidade da conta.
+  const cfg = { oauthAccount: { organizationType: 'unknown_kind', organizationRateLimitTier: 'default_raven', emailAddress: 'x@y.com' } };
+  assert.equal(parseClaudeConfig(cfg, NOW).plan, 'Claude');
+});
+
+test('parseClaudeConfig: sem oauthAccount → plan null (sem conta, some do overlay)', () => {
+  assert.equal(parseClaudeConfig({ cachedGrowthBookFeatures: {} }, NOW).plan, null);
 });
 
 test('parseClaudeConfig: payload vazio/malformado → tudo null', () => {
@@ -166,6 +184,26 @@ test('parseAnthropicUsage: janela ausente/sem utilization é pulada; clampa >100
   assert.deepEqual(parseAnthropicUsage({}, NOW), []);
 });
 
+// =========================== parseRetryAfter (backoff do 429) ===========================
+
+test('parseRetryAfter: delta-seconds ("1007") → ms', () => {
+  assert.equal(parseRetryAfter('1007', NOW), 1007 * 1000);
+  assert.equal(parseRetryAfter('0', NOW), 0);
+});
+
+test('parseRetryAfter: HTTP-date → ms até a data (nunca negativo)', () => {
+  const future = new Date(NOW + 5 * 60_000).toUTCString();
+  assert.equal(parseRetryAfter(future, NOW), 5 * 60_000);
+  const past = new Date(NOW - 60_000).toUTCString();
+  assert.equal(parseRetryAfter(past, NOW), 0);       // passado → 0, não negativo
+});
+
+test('parseRetryAfter: ausente/ilegível → null', () => {
+  assert.equal(parseRetryAfter(null, NOW), null);
+  assert.equal(parseRetryAfter(undefined, NOW), null);
+  assert.equal(parseRetryAfter('lixo', NOW), null);
+});
+
 // =========================== readClaudeUsage (I/O + OAuth) ===========================
 
 // Monta um home tmp com .claude.json (plano) e opcionalmente .credentials.json (OAuth).
@@ -228,6 +266,86 @@ test('readClaudeUsage: sem plano nem token → null', async () => {
   _clearClaudeCache();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'atl-')); // vazio
   assert.equal(await readClaudeUsage({ home: tmp, now: NOW }), null);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// fetcher que sempre lança 429 (com Retry-After em ms), contando chamadas.
+function fetcher429(retryAfterMs) {
+  const calls = [];
+  const fn = async (url, headers) => {
+    calls.push({ url, headers });
+    const e = new Error('HTTP 429');
+    e.statusCode = 429;
+    if (retryAfterMs != null) e.retryAfterMs = retryAfterMs;
+    throw e;
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+test('readClaudeUsage: 429 → cooldown NÃO rebate na API durante o Retry-After (bug do "Claude sumiu")', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  const f = fetcher429(20 * 60_000);                 // Retry-After 20 min
+  // 1ª coleta leva 429 → cai no plano-só e agenda o cooldown.
+  const r1 = await readClaudeUsage({ home: tmp, now: NOW, fetcher: f });
+  assert.equal(r1.length, 1);
+  assert.equal(r1[0].id, 'claude-plan');             // tile NÃO some
+  assert.equal(f.calls.length, 1);
+  // +60s: passou do cache (30s) MAS ainda no cooldown → não bate na API de novo.
+  const r2 = await readClaudeUsage({ home: tmp, now: NOW + 60_000, fetcher: f });
+  assert.equal(r2[0].id, 'claude-plan');
+  assert.equal(f.calls.length, 1, 'não deve rebater na API durante o cooldown do 429');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: 429 sem Retry-After usa cooldown padrão (15 min)', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  const f = fetcher429(null);                        // sem header legível
+  await readClaudeUsage({ home: tmp, now: NOW, fetcher: f });
+  // +10min < 15min padrão → ainda em cooldown, sem nova chamada.
+  await readClaudeUsage({ home: tmp, now: NOW + 10 * 60_000, fetcher: f });
+  assert.equal(f.calls.length, 1);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: 429 mantém o ÚLTIMO valor bom (não regride pro plano-só)', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  // 1ª: OK → 2 janelas reais. 2ª: 429 → deve segurar as janelas boas, não sumir %.
+  let n = 0;
+  const f = async () => {
+    n += 1;
+    if (n === 1) return JSON.stringify({ five_hour: { utilization: 42, resets_at: '2026-07-07T17:00:00Z' }, seven_day: { utilization: 80, resets_at: '2026-07-09T12:00:00Z' } });
+    const e = new Error('HTTP 429'); e.statusCode = 429; e.retryAfterMs = 20 * 60_000; throw e;
+  };
+  const r1 = await readClaudeUsage({ home: tmp, now: NOW, fetcher: f });
+  assert.equal(r1.length, 2);
+  assert.equal(r1[0].usedPct, 42);
+  // +60s: cache expirou → tenta, leva 429 → mantém as 2 janelas boas anteriores.
+  const r2 = await readClaudeUsage({ home: tmp, now: NOW + 60_000, fetcher: f });
+  assert.equal(r2.length, 2, 'segura as janelas boas em vez de cair pro plano-só');
+  assert.equal(r2[0].usedPct, 42);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('readClaudeUsage: após o cooldown expirar, rebate na API e recupera o %', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  let n = 0;
+  const f = async () => {
+    n += 1;
+    if (n === 1) { const e = new Error('HTTP 429'); e.statusCode = 429; e.retryAfterMs = 5 * 60_000; throw e; }
+    return JSON.stringify({ five_hour: { utilization: 12, resets_at: '2026-07-07T17:00:00Z' } });
+  };
+  const r1 = await readClaudeUsage({ home: tmp, now: NOW, fetcher: f });
+  assert.equal(r1[0].id, 'claude-plan');             // 429 → plano-só
+  // +6min: cooldown (5min) já expirou → bate de novo e pega o % real.
+  const r2 = await readClaudeUsage({ home: tmp, now: NOW + 6 * 60_000, fetcher: f });
+  assert.equal(r2[0].id, 'claude-5h');
+  assert.equal(r2[0].usedPct, 12);
+  assert.equal(n, 2, 'rebateu na API após o cooldown');
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 

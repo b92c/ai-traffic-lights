@@ -33,6 +33,16 @@ const CLAUDE_TIER_LABEL = {
   default_claude_max_20x: 'Max 20×',
 };
 
+// ---- tradução de organizationType → label humano (fallback quando o tier não é
+// um dos Max conhecidos). Cobre contas Team/Pro/Enterprise cujo tier tem código
+// interno opaco (ex.: default_raven) que não mapeamos individualmente. ----
+const CLAUDE_ORG_LABEL = {
+  claude_max: 'Claude Max',
+  claude_team: 'Claude Team',
+  claude_pro: 'Claude Pro',
+  claude_enterprise: 'Claude Enterprise',
+};
+
 // =========================== LÓGICA PURA (parse) ===========================
 
 // Extrai reset/plano/passes de um objeto .claude.json já parseado.
@@ -48,11 +58,18 @@ function parseClaudeConfig(cfg, now) {
   if (saffron.planLimitsEndDate) out.resetAt = saffron.planLimitsEndDate;
 
   // plano: oauthAccount.organizationType / organizationRateLimitTier
+  // Ordem: tier Max conhecido (mais específico) → tipo de org conhecido → org
+  // presente mas desconhecida (rótulo genérico "Claude"). Só fica null quando
+  // NÃO há conta OAuth alguma — aí o coletor omite o Claude do overlay.
   const acc = cfg.oauthAccount || {};
   if (acc.organizationRateLimitTier && CLAUDE_TIER_LABEL[acc.organizationRateLimitTier]) {
     out.plan = 'Claude ' + CLAUDE_TIER_LABEL[acc.organizationRateLimitTier];
-  } else if (acc.organizationType === 'claude_max') {
-    out.plan = 'Claude Max';
+  } else if (acc.organizationType && CLAUDE_ORG_LABEL[acc.organizationType]) {
+    out.plan = CLAUDE_ORG_LABEL[acc.organizationType];
+  } else if (acc.organizationType || acc.organizationUuid || acc.emailAddress) {
+    // conta existe (algum campo de identidade), mas tipo/tier não mapeados →
+    // não some do overlay; mostra o rótulo genérico.
+    out.plan = 'Claude';
   }
 
   // passes restantes (free passes do plano)
@@ -190,13 +207,14 @@ function windowTitle(min) {
 // =========================== I/O ===========================
 
 // Resolve o label do plano Claude (tier) a partir do .claude.json. Barato,
-// síncrono. Devolve 'Claude Max 5×' / 'Claude Max' / 'Claude'.
+// síncrono. Devolve 'Claude Max 5×' / 'Claude Team' / 'Claude' (genérico) quando
+// há conta, ou null quando NÃO há conta OAuth (sem .claude.json ou sem campos de
+// identidade). O null distingue "sem Claude" de "Claude sem plano mapeado".
 function claudePlanLabel({ home } = {}) {
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(home || os.homedir(), '.claude.json'), 'utf8'));
-    const p = parseClaudeConfig(cfg, 0);
-    return p.plan || 'Claude';
-  } catch { return 'Claude'; }
+    return parseClaudeConfig(cfg, 0).plan;   // null se não há conta
+  } catch { return null; }
 }
 
 // Lê o OAuth access token do Claude Code de ~/.claude/.credentials.json
@@ -215,11 +233,17 @@ function readClaudeOAuthToken({ home } = {}) {
 // 7 dias — o mesmo dado do painel/`/status`); se não houver token ou a chamada
 // falhar, cai no fallback: uma linha só com o plano (sem número, honesto).
 // Cache por token, 30s. Nunca lança.
-const _claudeCacheByToken = new Map(); // token → { at, entries }
+//
+// 429 (rate limit): a API manda Retry-After (ex.: ~1000s). Rebater a cada 60s
+// RENOVA a penalidade e o % nunca volta — foi o bug do "Claude sumiu". Ao levar
+// 429 agendamos um cooldown (respeitando Retry-After) durante o qual NÃO batemos
+// na API: devolvemos o último valor bom conhecido, ou o plano-só. Assim o tile
+// não some nem pisca ⚠ e a janela de rate limit expira sozinha.
+const _claudeCacheByToken = new Map(); // token → { at, entries, cooldownUntil }
 async function readClaudeUsage({ home, now, fetcher } = {}) {
   const plan = claudePlanLabel({ home });
   const token = readClaudeOAuthToken({ home });
-  const planOnly = plan !== 'Claude'
+  const planOnly = plan
     ? [{ id: 'claude-plan', agent: 'claude', plan, title: null, usedPct: null, resetAt: null, resetInMin: null, extra: null, source: 'claude.json', error: null }]
     : null;
   if (!token) return planOnly;
@@ -227,6 +251,10 @@ async function readClaudeUsage({ home, now, fetcher } = {}) {
   const nowMs = now || Date.now();
   const cached = _claudeCacheByToken.get(token);
   if (cached && (nowMs - cached.at) < CACHE_MS) return cached.entries;
+  // Cooldown pós-429 ainda vigente → não rebate; devolve o último bom (ou plano-só).
+  if (cached && cached.cooldownUntil && nowMs < cached.cooldownUntil) {
+    return cached.entries || planOnly;
+  }
 
   const headers = {
     Authorization: 'Bearer ' + token,
@@ -237,7 +265,16 @@ async function readClaudeUsage({ home, now, fetcher } = {}) {
   let payload;
   try {
     payload = await _httpsGetJson('https://api.anthropic.com/api/oauth/usage', headers, fetcher);
-  } catch {
+  } catch (e) {
+    // 429 → agenda cooldown (Retry-After, ou fallback conservador) e mantém o
+    // último valor conhecido; outras falhas (401/offline) caem no plano-só.
+    if (e && e.statusCode === 429) {
+      const retryMs = (typeof e.retryAfterMs === 'number' && e.retryAfterMs > 0)
+        ? e.retryAfterMs : CLAUDE_429_COOLDOWN_MS;
+      const keep = (cached && cached.entries) ? cached.entries : planOnly;
+      _claudeCacheByToken.set(token, { at: nowMs, entries: keep, cooldownUntil: nowMs + retryMs });
+      return keep;
+    }
     return planOnly; // token expirado/offline → plano-só (não polui com ⚠)
   }
   const windows = parseAnthropicUsage(payload, nowMs);
@@ -498,6 +535,18 @@ function defaultListAntigravityDbs(base) {
   catch { return []; }
 }
 
+// Converte o header Retry-After em ms. Aceita os dois formatos do HTTP: um
+// número de SEGUNDOS ("1007") ou uma data HTTP ("Wed, 21 Oct 2026 07:28:00 GMT").
+// `now` em ms (injetável p/ teste). Devolve ms >= 0, ou null se ilegível.
+function parseRetryAfter(header, now) {
+  if (header == null) return null;
+  const s = String(header).trim();
+  if (/^\d+$/.test(s)) return parseInt(s, 10) * 1000;   // delta-seconds
+  const when = Date.parse(s);                             // HTTP-date
+  if (Number.isNaN(when)) return null;
+  return Math.max(0, when - (now || Date.now()));
+}
+
 // Faz um GET HTTPS injetando um `fetcher` (testável). Em produção usa https.get.
 // Devolve o JSON parseado ou lança (quem chama captura).
 function _httpsGetJson(url, headers, fetcher, timeoutMs = 4000) {
@@ -508,8 +557,15 @@ function _httpsGetJson(url, headers, fetcher, timeoutMs = 4000) {
       (res) => {
         let data = '';
         res.on('data', (c) => { data += c; });
-        res.on('end', () => res.statusCode === 200
-          ? resolve(data) : reject(new Error(`HTTP ${res.statusCode}`)));
+        res.on('end', () => {
+          if (res.statusCode === 200) { resolve(data); return; }
+          // Anexa metadados ao erro p/ o caller decidir backoff (429 → cooldown).
+          const err = new Error(`HTTP ${res.statusCode}`);
+          err.statusCode = res.statusCode;
+          const ra = parseRetryAfter(res.headers && res.headers['retry-after']);
+          if (ra != null) err.retryAfterMs = ra;
+          reject(err);
+        });
       },
     );
     req.on('error', reject);
@@ -525,6 +581,8 @@ function _httpsGetJson(url, headers, fetcher, timeoutMs = 4000) {
 // não se sobrescrevem no cache. `label`/`suffix` distinguem contas na UI quando
 // há mais de uma (multi-conta); com 1 conta ficam vazios e o id fica canônico.
 const CACHE_MS = 30 * 1000;
+// Cooldown padrão quando o 429 não traz Retry-After legível (fallback conservador).
+const CLAUDE_429_COOLDOWN_MS = 15 * 60 * 1000; // 15 min
 const _glmCacheByToken = new Map(); // token → { at, entries }
 async function readGlmUsage({ env, now, fetcher, label, suffix } = {}) {
   const E = env || process.env;
@@ -817,7 +875,7 @@ function detectReset(prevState, entries, now, threshold) {
 if (typeof module !== 'undefined') module.exports = {
   parseClaudeConfig, parseAnthropicUsage, parseGlmQuota, parseCodexRateLimits, parseAntigravityTier, parseAntigravityQuota,
   readClaudeUsage, readGlmUsage, readCodexUsage, readAntigravityUsage, collectUsage, parseEnviron,
-  findCodexRollout, lastCodexRateLimits, mergeUsage, isSummaryEntry, detectReset,
-  USAGE_STALE_MS, USAGE_DROP_MS,
-  _clearGlmCache, _clearClaudeCache, _clearCodexCache, _httpsGetJson, CLAUDE_TIER_LABEL,
+  findCodexRollout, lastCodexRateLimits, mergeUsage, isSummaryEntry, detectReset, parseRetryAfter,
+  USAGE_STALE_MS, USAGE_DROP_MS, CLAUDE_429_COOLDOWN_MS,
+  _clearGlmCache, _clearClaudeCache, _clearCodexCache, _httpsGetJson, CLAUDE_TIER_LABEL, CLAUDE_ORG_LABEL,
 };

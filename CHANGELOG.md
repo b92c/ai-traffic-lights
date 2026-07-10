@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (únicos pontos que reafirmavam o `alwaysOnTop`). Agora `win.on('blur')` reafirma
   `setAlwaysOnTop(true, 'screen-saver')` + `moveTop()` — mesmo padrão do toggle/reveal.
   Complementa o raise explícito da v0.6.7.
+- **Consumo do Claude sumia do overlay.** Duas causas combinadas: (1) contas que
+  não são Claude Max (ex.: **Team**, tier interno `default_raven`) não eram
+  reconhecidas — o rótulo do plano virava `null` e o tile desaparecia; agora
+  `parseClaudeConfig` reconhece `claude_team`/`claude_pro`/`claude_enterprise` e
+  cai num rótulo genérico "Claude" para qualquer conta presente mas não mapeada.
+  (2) Ao levar **HTTP 429** (rate limit) da API de uso, o loop de 60 s rebatia na
+  mesma janela e **renovava a penalidade** indefinidamente — o `%` nunca voltava.
+  Agora um 429 agenda um **cooldown** que respeita o header `Retry-After` (ou 15
+  min de fallback): durante ele o coletor não bate na API e mantém o último valor
+  conhecido (ou o plano-só), sem sumir nem piscar ⚠.
 
 ## [0.6.7] - 2026-07-09
 
