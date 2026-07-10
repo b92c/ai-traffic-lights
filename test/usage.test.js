@@ -175,6 +175,33 @@ test('parseAnthropicUsage: extrai janelas 5h e 7d com utilization + resets_at', 
   assert.equal(out[1].usedPct, 78);
 });
 
+test('parseAnthropicUsage: extra_usage (overage) vira tile "Extra" com % e valor ($ minor units)', () => {
+  // payload REAL da conta Team (capturado 2026-07-10): used_credits/monthly_limit
+  // em centavos (decimal_places:2). 5042/5000 = $50.42/$50.00, 100%.
+  const payload = {
+    five_hour: { utilization: 7, resets_at: '2026-07-07T17:00:00Z' },
+    extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 5042, utilization: 100, currency: 'USD', decimal_places: 2 },
+  };
+  const out = parseAnthropicUsage(payload, NOW);
+  assert.equal(out.length, 2);
+  const extra = out.find((w) => w.title === 'Extra');
+  assert.ok(extra, 'tile Extra presente');
+  assert.equal(extra.usedPct, 100);
+  assert.equal(extra.extra, '$50.4/$50.0');
+});
+
+test('parseAnthropicUsage: extra_usage desabilitado ou sem limite → não vira tile', () => {
+  assert.equal(parseAnthropicUsage({ extra_usage: { is_enabled: false, monthly_limit: 5000, used_credits: 10 } }, NOW).length, 0);
+  assert.equal(parseAnthropicUsage({ extra_usage: { is_enabled: true, monthly_limit: 0 } }, NOW).length, 0);
+});
+
+test('parseAnthropicUsage: extra_usage sem utilization → % derivado de used/limit', () => {
+  const out = parseAnthropicUsage({ extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 2500, currency: 'USD', decimal_places: 2 } }, NOW);
+  assert.equal(out[0].title, 'Extra');
+  assert.equal(out[0].usedPct, 50);              // 2500/5000
+  assert.equal(out[0].extra, '$25.0/$50.0');
+});
+
 test('parseAnthropicUsage: janela ausente/sem utilization é pulada; clampa >100', () => {
   const out = parseAnthropicUsage({ five_hour: { utilization: 150 }, seven_day: null }, NOW);
   assert.equal(out.length, 1);
@@ -236,6 +263,31 @@ test('readClaudeUsage: OAuth ok → 2 linhas (5h + 7d) com % e reset reais', asy
   // header OAuth correto
   assert.equal(f.calls[0].headers.Authorization, 'Bearer oauth-tok');
   assert.equal(f.calls[0].headers['anthropic-beta'], 'oauth-2025-04-20');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('claudePlanFromCreds: tier Max conhecido vence; senão subscriptionType', () => {
+  const { claudePlanFromCreds } = require('../src/usage');
+  assert.equal(claudePlanFromCreds({ rateLimitTier: 'default_claude_max_5x' }), 'Claude Max 5×');
+  assert.equal(claudePlanFromCreds({ subscriptionType: 'team', rateLimitTier: 'default_raven' }), 'Claude Team');
+  assert.equal(claudePlanFromCreds({ subscriptionType: 'enterprise' }), 'Claude Enterprise');
+  assert.equal(claudePlanFromCreds({}), null);   // sem info → null (caller usa .claude.json)
+});
+
+test('readClaudeUsage: extra_usage vira tile id=claude-extra (não colide com 7d)', async () => {
+  _clearClaudeCache();
+  const tmp = claudeHome({ token: 'tok' });
+  const f = mockFetcher({
+    five_hour: { utilization: 7, resets_at: '2026-07-07T17:00:00Z' },
+    seven_day: { utilization: 24, resets_at: '2026-07-09T12:00:00Z' },
+    extra_usage: { is_enabled: true, monthly_limit: 5000, used_credits: 5042, utilization: 100, currency: 'USD', decimal_places: 2 },
+  });
+  const r = await readClaudeUsage({ home: tmp, now: NOW, fetcher: f });
+  const ids = r.map((e) => e.id).sort();
+  assert.deepEqual(ids, ['claude-5h', 'claude-7d', 'claude-extra'], 'três ids distintos (Extra não colide)');
+  const extra = r.find((e) => e.id === 'claude-extra');
+  assert.equal(extra.usedPct, 100);
+  assert.equal(extra.extra, '$50.4/$50.0');
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 

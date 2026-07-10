@@ -167,6 +167,26 @@ function parseAnthropicUsage(payload, now) {
       ? Math.max(0, Math.round((Date.parse(resetAt) - nowMs) / 60000)) : null;
     out.push({ title: w.title, usedPct: clampPct(win.utilization), resetAt, resetInMin });
   }
+  // extra_usage: uso "extra"/overage medido em dinheiro (Team/Enterprise com
+  // limite mensal de crédito, ou Pro com overage). used_credits/monthly_limit
+  // vêm em UNIDADES MENORES da moeda (decimal_places: USD=2 → centavos). Vira um
+  // tile "Extra" com % e o valor gasto/limite (ex.: "$50.4/$50"). Só entra quando
+  // habilitado e com limite positivo — senão fica fora (não polui a barra).
+  const ex = payload.extra_usage;
+  if (ex && typeof ex === 'object' && ex.is_enabled && typeof ex.monthly_limit === 'number' && ex.monthly_limit > 0) {
+    const dec = (typeof ex.decimal_places === 'number' && ex.decimal_places >= 0 && ex.decimal_places <= 4) ? ex.decimal_places : 2;
+    const div = Math.pow(10, dec);
+    const spent = typeof ex.used_credits === 'number' ? ex.used_credits / div : null;
+    const limit = ex.monthly_limit / div;
+    const pct = typeof ex.utilization === 'number' ? clampPct(ex.utilization)
+      : (spent != null ? clampPct((spent / limit) * 100) : null);
+    const resetAt = typeof ex.resets_at === 'string' ? ex.resets_at : null;
+    const resetInMin = resetAt && !Number.isNaN(Date.parse(resetAt))
+      ? Math.max(0, Math.round((Date.parse(resetAt) - nowMs) / 60000)) : null;
+    const sym = ex.currency === 'USD' || !ex.currency ? '$' : (ex.currency + ' ');
+    const extra = spent != null ? `${sym}${spent.toFixed(dec === 0 ? 0 : 1)}/${sym}${limit.toFixed(dec === 0 ? 0 : 1)}` : null;
+    out.push({ title: 'Extra', usedPct: pct, resetAt, resetInMin, extra });
+  }
   return out;
 }
 
@@ -225,11 +245,34 @@ function readClaudeConfig({ home, now } = {}) {
 // não gravamos nem renovamos — se estiver expirado, a API rejeita e caímos no
 // fallback plano-só (o Claude Code renova sozinho no uso normal). Nunca lança.
 function readClaudeOAuthToken({ home } = {}) {
+  return readClaudeCreds({ home }).accessToken;
+}
+
+// Lê as credenciais OAuth: accessToken + subscriptionType + rateLimitTier. Estes
+// dois últimos são a fonte MAIS confiável do plano (o .claude.json pode trazer um
+// tier interno opaco como 'default_raven', enquanto as credenciais trazem o tier
+// real 'default_claude_max_5x'). Nunca lança — campos ausentes viram null.
+function readClaudeCreds({ home } = {}) {
   try {
     const creds = JSON.parse(fs.readFileSync(path.join(home || os.homedir(), '.claude/.credentials.json'), 'utf8'));
-    const t = creds && creds.claudeAiOauth && creds.claudeAiOauth.accessToken;
-    return typeof t === 'string' && t ? t : null;
-  } catch { return null; }
+    const o = (creds && creds.claudeAiOauth) || {};
+    return {
+      accessToken: typeof o.accessToken === 'string' && o.accessToken ? o.accessToken : null,
+      subscriptionType: typeof o.subscriptionType === 'string' ? o.subscriptionType : null,
+      rateLimitTier: typeof o.rateLimitTier === 'string' ? o.rateLimitTier : null,
+    };
+  } catch { return { accessToken: null, subscriptionType: null, rateLimitTier: null }; }
+}
+
+// Resolve o rótulo do plano a partir das credenciais (fonte confiável). O tier
+// Max conhecido vence; senão o subscriptionType (team/pro/enterprise) vira label.
+// Devolve null se as credenciais não bastam (o caller cai no .claude.json).
+function claudePlanFromCreds({ subscriptionType, rateLimitTier } = {}) {
+  if (rateLimitTier && CLAUDE_TIER_LABEL[rateLimitTier]) return 'Claude ' + CLAUDE_TIER_LABEL[rateLimitTier];
+  const sub = (subscriptionType || '').toLowerCase();
+  const SUB_LABEL = { max: 'Claude Max', team: 'Claude Team', pro: 'Claude Pro', enterprise: 'Claude Enterprise' };
+  if (SUB_LABEL[sub]) return SUB_LABEL[sub];
+  return null;
 }
 
 // Coletor do Claude. Tenta a API OAuth de uso (% E reset REAIS das janelas 5h e
@@ -245,8 +288,12 @@ function readClaudeOAuthToken({ home } = {}) {
 const _claudeCacheByToken = new Map(); // token → { at, entries, cooldownUntil }
 async function readClaudeUsage({ home, now, fetcher, cooldownUntil, cooldownFails, setCooldown } = {}) {
   const pc = readClaudeConfig({ home, now });
-  const plan = pc ? pc.plan : null;
-  const token = readClaudeOAuthToken({ home });
+  const creds = readClaudeCreds({ home });
+  // Plano: credenciais primeiro (tier/subscription REAIS — ex.: 'default_claude_max_5x'),
+  // depois o .claude.json (que pode ter só um tier interno opaco). Se nenhum
+  // resolve mas há conta, cai no genérico do .claude.json (ou null = sem conta).
+  const plan = claudePlanFromCreds(creds) || (pc ? pc.plan : null);
+  const token = creds.accessToken;
   // Tile plano-só (sem a API OAuth): mostra só o plano + passes, SEM reset. O
   // planLimitsEndDate do .claude.json é o fim do ciclo do PLANO (ex.: Jul 13),
   // NÃO o reset da janela de uso (5h/7d, que reseta várias vezes até lá) — pô-lo
@@ -300,15 +347,18 @@ async function readClaudeUsage({ home, now, fetcher, cooldownUntil, cooldownFail
   }
   const windows = parseAnthropicUsage(payload, nowMs);
   if (!windows.length) return planOnly;
+  // id estável por janela (5h/7d/extra) — o 'Extra' (overage) NÃO pode colidir
+  // com o 7d; um mapa explícito evita o ternário que jogava tudo em '7d'.
+  const idByTitle = { '5 h': 'claude-5h', '7 dias': 'claude-7d', 'Extra': 'claude-extra' };
   const entries = windows.map((w) => ({
-    id: 'claude-' + (w.title === '5 h' ? '5h' : '7d'),
+    id: idByTitle[w.title] || 'claude-' + String(w.title).replace(/\s+/g, ''),
     agent: 'claude',
     title: w.title,
     plan,
     usedPct: w.usedPct,
     resetAt: w.resetAt,
     resetInMin: w.resetInMin,
-    extra: null,
+    extra: w.extra || null,          // 'Extra' traz "$50.4/$50"; janelas não têm
     source: 'anthropic.oauth',
     error: null,
   }));
@@ -923,4 +973,5 @@ if (typeof module !== 'undefined') module.exports = {
   USAGE_STALE_MS, USAGE_DROP_MS, CLAUDE_429_COOLDOWN_MS, CLAUDE_CACHE_MS,
   CLAUDE_429_BACKOFF_FACTOR, CLAUDE_429_MAX_BACKOFF_MS,
   _clearGlmCache, _clearClaudeCache, _clearCodexCache, _httpsGetJson, CLAUDE_TIER_LABEL, CLAUDE_ORG_LABEL,
+  readClaudeCreds, claudePlanFromCreds,
 };

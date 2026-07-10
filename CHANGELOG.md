@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hora (fura o cache de conveniência de 5 min). É **seguro**: respeita o cooldown
   do 429 — durante a janela de rate limit o botão fica apagado com tooltip
   "aguarde Xmin" e **não** bate na API (evita re-escalar a penalidade).
+- **Tile de uso "Extra" (overage)** para contas com crédito extra medido em
+  dinheiro (`extra_usage` da API — Team/Enterprise/Pro com limite mensal). Mostra
+  o % e o valor gasto/limite (ex.: `$50.4/$50.0`), respeitando a moeda e as casas
+  decimais (`decimal_places`) do payload.
+
+### Changed
+- **Plano do Claude resolvido pelas credenciais** (`~/.claude/.credentials.json`:
+  `rateLimitTier`/`subscriptionType`) antes do `.claude.json`. As credenciais
+  trazem o tier REAL (ex.: `default_claude_max_5x`) enquanto o `.claude.json` pode
+  ter um tier interno opaco (`default_raven`) — assim o rótulo fica preciso
+  ("Claude Max 5×") em vez do genérico.
 
 ### Changed
 ### Fixed
