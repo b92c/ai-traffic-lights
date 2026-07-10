@@ -206,11 +206,12 @@ function windowTitle(min) {
 
 // =========================== I/O ===========================
 
-// Lê o .claude.json e devolve o objeto COMPLETO do parseClaudeConfig — plano,
-// reset (planLimitsEndDate), resetInMin e passes — p/ o tile plano-só poder
-// mostrar o reset mesmo sem a API OAuth (ex.: conta Team durante um 429). Barato,
+// Lê o .claude.json e devolve o objeto COMPLETO do parseClaudeConfig — plano e
+// passes (o tile plano-só usa isso quando a API OAuth não responde). Barato,
 // síncrono. Devolve null quando NÃO há conta OAuth (sem .claude.json ou sem
 // campos de identidade) — distingue "sem Claude" de "Claude sem plano mapeado".
+// Obs.: parsed.resetAt aqui é o planLimitsEndDate (fim do ciclo do PLANO), NÃO o
+// reset da janela de uso — por isso o caller o ignora no tile plano-só.
 function readClaudeConfig({ home, now } = {}) {
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(home || os.homedir(), '.claude.json'), 'utf8'));
@@ -246,11 +247,15 @@ async function readClaudeUsage({ home, now, fetcher, cooldownUntil, cooldownFail
   const pc = readClaudeConfig({ home, now });
   const plan = pc ? pc.plan : null;
   const token = readClaudeOAuthToken({ home });
-  // Tile plano-só: mostra o reset (planLimitsEndDate) e passes mesmo sem a API
-  // OAuth — assim a conta Team exibe "3d" durante um 429, em vez de campo vazio.
+  // Tile plano-só (sem a API OAuth): mostra só o plano + passes, SEM reset. O
+  // planLimitsEndDate do .claude.json é o fim do ciclo do PLANO (ex.: Jul 13),
+  // NÃO o reset da janela de uso (5h/7d, que reseta várias vezes até lá) — pô-lo
+  // aqui enganava ("3d" logo após a janela ter resetado). O reset REAL das
+  // janelas só existe no runtime da API (resets_at) → sem API, honestamente sem
+  // reset. `passes` (free passes do plano) é info local legítima, fica.
   const planOnly = plan
     ? [{ id: 'claude-plan', agent: 'claude', plan, title: null, usedPct: null,
-        resetAt: pc.resetAt, resetInMin: pc.resetInMin,
+        resetAt: null, resetInMin: null,
         extra: (pc.passes != null ? pc.passes + ' passes' : null),
         source: 'claude.json', error: null }]
     : null;

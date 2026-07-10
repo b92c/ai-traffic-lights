@@ -251,19 +251,24 @@ test('readClaudeUsage: sem token OAuth → fallback plano-só (1 linha, sem %)',
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('readClaudeUsage: plano-só mostra o RESET do plano (planLimitsEndDate) — bug do "reset vazio"', async () => {
+test('readClaudeUsage: plano-só NÃO mostra planLimitsEndDate como reset (é fim do ciclo do plano, não da janela)', async () => {
+  // planLimitsEndDate (ex.: Jul 13) é o fim do ciclo do PLANO, não o reset da
+  // janela de uso 5h/7d (que reseta várias vezes até lá). Pô-lo no tile enganava
+  // ("3d" logo após a janela resetar). Sem a API OAuth → honestamente sem reset.
   _clearClaudeCache();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'atl-'));
   fs.writeFileSync(path.join(tmp, '.claude.json'), JSON.stringify({
     oauthAccount: { organizationType: 'claude_team', organizationRateLimitTier: 'default_raven' },
-    cachedGrowthBookFeatures: { tengu_saffron_lattice: { planLimitsEndDate: '2026-07-07T17:00:00Z' } }, // 5h após NOW
+    cachedGrowthBookFeatures: { tengu_saffron_lattice: { planLimitsEndDate: '2026-07-13T07:00:00Z' } },
+    passesLastSeenRemaining: 2,
   }));
   const r = await readClaudeUsage({ home: tmp, now: NOW });   // sem token → plano-só
   assert.equal(r[0].id, 'claude-plan');
   assert.equal(r[0].plan, 'Claude Team');
-  assert.equal(r[0].resetAt, '2026-07-07T17:00:00Z', 'reset do plano preenchido (antes era null)');
-  assert.equal(r[0].resetInMin, 5 * 60, 'resetInMin calculado');
+  assert.equal(r[0].resetAt, null, 'NÃO expõe planLimitsEndDate como reset da janela');
+  assert.equal(r[0].resetInMin, null);
   assert.equal(r[0].usedPct, null);                           // % só vem da API (honesto)
+  assert.equal(r[0].extra, '2 passes');                       // passes é info local legítima
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
