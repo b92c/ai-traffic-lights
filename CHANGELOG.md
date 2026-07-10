@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+### Changed
+### Fixed
+
+## [0.6.8] - 2026-07-10
+
+### Added
 - **Botão "atualizar uso agora" (⟳)** no header do overlay. Força a recoleta na
   hora (fura o cache de conveniência de 5 min). É **seguro**: respeita o cooldown
   do 429 — durante a janela de rate limit o botão fica apagado com tooltip
@@ -34,8 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Consumo do Claude sumia do overlay.** Duas causas combinadas: (1) contas que
   não são Claude Max (ex.: **Team**, tier interno `default_raven`) não eram
   reconhecidas — o rótulo do plano virava `null` e o tile desaparecia; agora
-  `parseClaudeConfig` reconhece `claude_team`/`claude_pro`/`claude_enterprise` e
-  cai num rótulo genérico "Claude" para qualquer conta presente mas não mapeada.
+  `parseClaudeConfig`/credenciais reconhecem `claude_team`/`claude_pro`/`claude_enterprise`
+  e caem num rótulo genérico "Claude" para qualquer conta presente mas não mapeada.
   (2) Ao levar **HTTP 429** (rate limit) da API de uso, o loop de 60 s rebatia na
   mesma janela e **renovava a penalidade** indefinidamente — o `%` nunca voltava.
   Agora um 429 agenda um **cooldown** que respeita o header `Retry-After` (ou 15
@@ -45,13 +51,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   de 5h/7d — não faz sentido consultar a cada 60 s). O cooldown é **persistido em
   disco** (`claude-cooldown.json`, só o timestamp — nunca o token), então rodar em
   dev (`bun start`/restarts) não re-bate no boot nem **re-escala** o rate limit.
-  **Reset do plano no tile plano-só**: o `planLimitsEndDate` (ex.: reset semanal do
-  Claude Team) agora aparece mesmo sem a API OAuth — antes o tile mostrava o campo
-  de reset vazio. **Backoff exponencial**: o endpoint `/api/oauth/usage` é compartilhado com o
+  **Backoff exponencial**: o endpoint `/api/oauth/usage` é compartilhado com o
   próprio Claude Code (`/status`) — limite agregado apertado. A cada 429 seguido, o
   app alonga a espera (`Retry-After × 1.5^fails`, teto 1 h) em vez de rebater logo
   que o `Retry-After` expira, dando espaço ao limite recuperar (bater de volta só
   piorava a punição).
+- **GLM/z.ai mensal aparecia 2×.** A mesma conta chegando por 2 credenciais
+  (tokens distintos) recebia `resetAt` da API com ~1 ms de diferença, e a dedup por
+  conteúdo usava o `resetAt` exato → não colapsava. A chave agora normaliza o
+  `resetAt` para segundos.
 
 ## [0.6.7] - 2026-07-09
 
