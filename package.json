@@ -51,6 +51,7 @@
         "--disable-dev-shm-usage",
         "--ozone-platform=x11"
       ]
+    },
     "appImage": {
       "artifactName": "${name}-${version}.${ext}"
     },
