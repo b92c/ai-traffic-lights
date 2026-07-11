@@ -195,8 +195,11 @@ function discoverAgentProcs() {
         
         let agent = COMM_TO_AGENT.get(comm);
         if (!agent && (comm === 'node' || comm === 'node-options') && ARGV_TO_AGENT.size) {
-          const scriptName = path.basename(argv[1] || '');
-          agent = ARGV_TO_AGENT.get(scriptName);
+          for (let i = 1; i < argv.length; i++) {
+            const scriptName = path.basename(argv[i] || '');
+            agent = ARGV_TO_AGENT.get(scriptName);
+            if (agent) break;
+          }
         }
         if (!agent) continue;
         
@@ -218,8 +221,7 @@ function discoverAgentProcs() {
         try {
           const comm = fs.readFileSync(`/proc/${ent}/comm`, 'utf8').trim();
           let agent = COMM_TO_AGENT.get(comm);
-          // CLIs Node (comm="node"): identifica pelo basename do script no argv
-          if (!agent && comm === 'node' && ARGV_TO_AGENT.size) {
+          if (!agent && (comm === 'node' || comm === 'node-options') && ARGV_TO_AGENT.size) {
             try {
               const argv = fs.readFileSync(`/proc/${ent}/cmdline`, 'utf8').split('\0');
               agent = ARGV_TO_AGENT.get(path.basename(argv[1] || ''));
@@ -346,6 +348,33 @@ function focusTab(state) {
   } catch {}
 }
 
+function parseMacOSEnviron(content) {
+  if (!content) return '';
+  const regex = /(?<=\s|^)([A-Za-z0-9_]+)=/g;
+  const matches = [];
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    matches.push({
+      key: match[1],
+      index: match.index,
+      valueStart: match.index + match[0].length
+    });
+  }
+  const envVars = [];
+  for (let i = 0; i < matches.length; i++) {
+    const start = matches[i].valueStart;
+    const end = (i + 1 < matches.length) ? matches[i + 1].index : content.length;
+    const val = content.slice(start, end).trim();
+    envVars.push(`${matches[i].key}=${val}`);
+  }
+  return envVars.join('\0');
+}
+
+function escapeAppleScriptString(str) {
+  if (typeof str !== 'string') return '';
+  return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 function getProcessEnviron(pid) {
   if (!pid) return '';
   if (process.platform === 'darwin') {
@@ -354,14 +383,7 @@ function getProcessEnviron(pid) {
       const lines = output.split('\n');
       if (lines.length < 2) return '';
       const content = lines.slice(1).join(' ');
-      const envVars = [];
-      const parts = content.split(/\s+/);
-      for (const part of parts) {
-        if (part.includes('=')) {
-          envVars.push(part);
-        }
-      }
-      return envVars.join('\0');
+      return parseMacOSEnviron(content);
     } catch {
       return '';
     }
@@ -495,10 +517,28 @@ function detectLaunchers() {
 function availableTerminals() {
   if (process.platform === 'darwin') {
     const list = [];
-    if (fs.existsSync('/Applications/iTerm.app')) list.push('iterm2');
-    if (fs.existsSync('/System/Applications/Utilities/Terminal.app')) list.push('terminal');
-    if (fs.existsSync('/Applications/Warp.app')) list.push('warp');
-    if (fs.existsSync('/Applications/Ghostty.app')) list.push('ghostty');
+    const homeApps = path.join(process.env.HOME || '/', 'Applications');
+    
+    if (fs.existsSync('/Applications/iTerm.app') || 
+        fs.existsSync(path.join(homeApps, 'iTerm.app')) || 
+        !!scanPathBin('iterm')) {
+      list.push('iterm2');
+    }
+    if (fs.existsSync('/System/Applications/Utilities/Terminal.app') || 
+        fs.existsSync('/Applications/Utilities/Terminal.app') || 
+        fs.existsSync(path.join(homeApps, 'Utilities/Terminal.app'))) {
+      list.push('terminal');
+    }
+    if (fs.existsSync('/Applications/Warp.app') || 
+        fs.existsSync(path.join(homeApps, 'Warp.app')) ||
+        !!scanPathBin('warp')) {
+      list.push('warp');
+    }
+    if (fs.existsSync('/Applications/Ghostty.app') || 
+        fs.existsSync(path.join(homeApps, 'Ghostty.app')) || 
+        !!scanPathBin('ghostty')) {
+      list.push('ghostty');
+    }
     return list;
   }
   return launcher.TERMINAL_ORDER.filter((t) => !!scanPathBin(t));
@@ -531,9 +571,11 @@ function launchAgent({ agent, cwd }) {
     const term = settingsCfg.terminal === 'auto' ? (availableTerminals()[0] || 'terminal') : settingsCfg.terminal;
     
     if (term === 'terminal') {
+      const escDir = escapeAppleScriptString(dir);
+      const escPath = escapeAppleScriptString(entry.path);
       const appleScript = `
         tell application "Terminal"
-          do script "cd '${dir.replace(/'/g, "'\\''")}' && ${entry.path.replace(/'/g, "'\\''")}"
+          do script "cd " & quoted form of "${escDir}" & " && " & quoted form of "${escPath}"
           activate
         end tell
       `;
@@ -542,11 +584,13 @@ function launchAgent({ agent, cwd }) {
     }
     
     if (term === 'iterm2') {
+      const escDir = escapeAppleScriptString(dir);
+      const escPath = escapeAppleScriptString(entry.path);
       const appleScript = `
         tell application "iTerm"
           create window with default profile
           tell current session of current window
-            write text "cd '${dir.replace(/'/g, "'\\''")}' && ${entry.path.replace(/'/g, "'\\''")}"
+            write text "cd " & quoted form of "${escDir}" & " && " & quoted form of "${escPath}"
           end tell
           activate
         end tell
@@ -556,12 +600,30 @@ function launchAgent({ agent, cwd }) {
     }
     
     if (term === 'warp') {
-      try { spawn('open', ['-a', 'Warp', dir], { detached: true, stdio: 'ignore' }).unref(); } catch (e) { notifyUser(`Launch failed: ${e.message}`); }
+      const warpDir = path.join(process.env.HOME || '/', '.warp', 'launch_configurations');
+      try {
+        fs.mkdirSync(warpDir, { recursive: true });
+        const configName = `ai-traffic-lights-${agent}`;
+        const yamlPath = path.join(warpDir, `${configName}.yaml`);
+        const yamlContent = [
+          `name: AI Traffic Lights - ${agent}`,
+          `windows:`,
+          `  - tabs:`,
+          `      - panes:`,
+          `          - cwd: ${JSON.stringify(dir)}`,
+          `            commands:`,
+          `              - ${JSON.stringify(entry.path)}`
+        ].join('\n') + '\n';
+        fs.writeFileSync(yamlPath, yamlContent, 'utf8');
+        spawn('open', [`warp://launch/${configName}`], { detached: true, stdio: 'ignore' }).unref();
+      } catch (e) {
+        notifyUser(`Launch failed: ${e.message}`);
+      }
       return;
     }
     
     if (term === 'ghostty') {
-      try { spawn('open', ['-a', 'Ghostty', '--args', `--working-directory=${dir}`, entry.path], { detached: true, stdio: 'ignore' }).unref(); } catch (e) { notifyUser(`Launch failed: ${e.message}`); }
+      try { spawn('open', ['-a', 'Ghostty', '--args', `--working-directory=${dir}`, `--initial-command=${entry.path}`], { detached: true, stdio: 'ignore' }).unref(); } catch (e) { notifyUser(`Launch failed: ${e.message}`); }
       return;
     }
   }
@@ -1216,31 +1278,49 @@ function glmCredsFromSessions() {
 // Dedup por token. Nunca lança; só lê o que o dono consegue (EACCES → skip).
 function glmCredsFromProc() {
   const byToken = new Map();
-  let pids = [];
   if (process.platform === 'darwin') {
     try {
-      const output = execFileSync('ps', ['-ax', '-o', 'pid='], { encoding: 'utf8', timeout: 2000 });
-      pids = output.split('\n').map(l => parseInt(l.trim(), 10)).filter(n => !isNaN(n));
+      const output = execFileSync('ps', ['-ax', '-E', '-o', 'pid=,args='], { encoding: 'utf8', timeout: 3000 });
+      for (const line of output.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const m = trimmed.match(/^(\d+)\s+(.+)$/);
+        if (!m) continue;
+        const content = m[2];
+        const rawEnv = parseMacOSEnviron(content);
+        const env = usage.parseEnviron(rawEnv, ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN']);
+        if (!env.ANTHROPIC_BASE_URL || !env.ANTHROPIC_AUTH_TOKEN) continue;
+        if (!/api\.z\.ai|bigmodel\.cn/.test(env.ANTHROPIC_BASE_URL)) continue;
+        const token = env.ANTHROPIC_AUTH_TOKEN;
+        if (byToken.has(token)) continue;
+        let suffix;
+        try { suffix = crypto_().createHash('sha256').update(token).digest('hex').slice(0, 6); }
+        catch { suffix = String(byToken.size + 1); }
+        let label = '';
+        try { label = new URL(env.ANTHROPIC_BASE_URL).host.replace(/^api\./, ''); } catch {}
+        byToken.set(token, { env, label, suffix });
+        if (byToken.size >= 2) break;
+      }
     } catch { return []; }
   } else {
+    let pids = [];
     try { pids = fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).map(n => parseInt(n, 10)); } catch { return []; }
-  }
-  for (const pid of pids) {
-    let raw;
-    try { raw = getProcessEnviron(pid); } catch { continue; } // morto ou sem permissão
-    const env = usage.parseEnviron(raw, ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN']);
-    if (!env.ANTHROPIC_BASE_URL || !env.ANTHROPIC_AUTH_TOKEN) continue;
-    if (!/api\.z\.ai|bigmodel\.cn/.test(env.ANTHROPIC_BASE_URL)) continue; // só backend GLM
-    const token = env.ANTHROPIC_AUTH_TOKEN;
-    if (byToken.has(token)) continue;
-    let suffix;
-    try { suffix = crypto_().createHash('sha256').update(token).digest('hex').slice(0, 6); }
-    catch { suffix = String(byToken.size + 1); }
-    let label = '';
-    try { label = new URL(env.ANTHROPIC_BASE_URL).host.replace(/^api\./, ''); } catch {}
-    byToken.set(token, { env, label, suffix });
-    // bastam 2 contas distintas — não precisa varrer os ~1000 processos todos
-    if (byToken.size >= 2) break;
+    for (const pid of pids) {
+      let raw;
+      try { raw = getProcessEnviron(pid); } catch { continue; }
+      const env = usage.parseEnviron(raw, ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN']);
+      if (!env.ANTHROPIC_BASE_URL || !env.ANTHROPIC_AUTH_TOKEN) continue;
+      if (!/api\.z\.ai|bigmodel\.cn/.test(env.ANTHROPIC_BASE_URL)) continue;
+      const token = env.ANTHROPIC_AUTH_TOKEN;
+      if (byToken.has(token)) continue;
+      let suffix;
+      try { suffix = crypto_().createHash('sha256').update(token).digest('hex').slice(0, 6); }
+      catch { suffix = String(byToken.size + 1); }
+      let label = '';
+      try { label = new URL(env.ANTHROPIC_BASE_URL).host.replace(/^api\./, ''); } catch {}
+      byToken.set(token, { env, label, suffix });
+      if (byToken.size >= 2) break;
+    }
   }
   return [...byToken.values()];
 }

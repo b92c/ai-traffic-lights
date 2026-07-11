@@ -67,7 +67,7 @@ por sessão, clique para pular pro terminal — **janela _e_ aba**.
 
 ## Requisitos
 
-- **Linux** (suporte completo no X11, parcial no Wayland — veja [Solução de problemas](#solucao-de-problemas)) ou **macOS** (suporta Apple Silicon M1–M5).
+- **Linux** (suporte completo no X11, parcial no Wayland — veja [Solução de problemas](#solução-de-problemas)) ou **macOS** (suporta Apple Silicon M1–M5).
 - No Linux: `wmctrl`, `xdotool`, `jq` — `sudo apt install wmctrl xdotool jq`
 - No macOS: Homebrew e `jq` — `brew install jq`
 - Node.js 20+

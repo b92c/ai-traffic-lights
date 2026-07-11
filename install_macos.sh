@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-#
-# install_macos.sh — Instala e configura o AI Traffic Lights no macOS (M1 a M5 / arm64).
-#
-# Uso (1 linha):
-#   curl -fsSL https://raw.githubusercontent.com/aronpc/ai-traffic-lights/main/install_macos.sh | bash
-#
+
 set -euo pipefail
 
 REPO="aronpc/ai-traffic-lights"
@@ -18,7 +13,6 @@ ok()   { printf '\033[1;32m✓\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m⚠️\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 
-# ----------------------------- verificar SO e Arquitetura -----------------------------
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
@@ -28,10 +22,8 @@ fi
 
 if [ "$ARCH" != "arm64" ]; then
   warn "Sua arquitetura é $ARCH. Este build é otimizado para Apple Silicon (M1, M2, M3, M4, M5)."
-  # Prossiga mesmo assim caso queira rodar via Rosetta, mas envie alerta.
 fi
 
-# ----------------------------- verificar dependências (Homebrew & jq) -----------------------------
 if ! command -v brew >/dev/null 2>&1; then
   die "Homebrew não encontrado. Por favor, instale o Homebrew em https://brew.sh e tente novamente."
 fi
@@ -44,7 +36,6 @@ else
   ok "'jq' já está instalado."
 fi
 
-# ----------------------------- obter release e baixar DMG -----------------------------
 info "Consultando a versão mais recente para macOS no GitHub..."
 json=""
 if ! json="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$API_URL")"; then
@@ -53,15 +44,15 @@ fi
 
 download_url=""
 if [ -n "$json" ]; then
-  download_url="$(printf '%s\n' "$json" | grep -oE '"browser_download_url":[[:space:]]*"[^"]+\.dmg"' | head -1 | sed -E 's/.*"([^"]+)"$/\1/' || true)"
-  version="$(printf '%s\n' "$json" | grep -oE '"tag_name":[[:space:]]*"v[^"]+"' | head -1 | sed -E 's/.*"v([^"]+)"$/\1/' || true)"
+  download_url="$(printf '%s\n' "$json" | jq -r '.assets[] | select(.name | endswith(".dmg")) | .browser_download_url' | head -1 || true)"
+  version="$(printf '%s\n' "$json" | jq -r '.tag_name | sub("^v"; "")' || true)"
 fi
 
 TMP_DIR="/tmp/ai-traffic-lights-install"
 rm -rf "$TMP_DIR" && mkdir -p "$TMP_DIR"
 DMG_PATH="$TMP_DIR/$DMG_NAME"
 
-if [ -n "$download_url" ]; then
+if [ -n "$download_url" ] && [ "$download_url" != "null" ]; then
   info "Baixando versão v${version} de: $download_url"
   curl -fSL --retry 3 -o "$DMG_PATH" "$download_url"
   ok "Download concluído."
@@ -71,18 +62,21 @@ if [ -n "$download_url" ]; then
   mkdir -p "$MOUNT_POINT"
   hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT_POINT" "$DMG_PATH"
   
-  # Copiar app substituindo se já existir
-  rm -rf "/Applications/$APP_NAME"
-  cp -R "$MOUNT_POINT/$APP_NAME" "/Applications/"
-  
-  hdiutil detach "$MOUNT_POINT"
-  ok "Aplicativo copiado para /Applications/$APP_NAME"
+  rm -rf "/Applications/${APP_NAME}.tmp"
+  if cp -R "$MOUNT_POINT/$APP_NAME" "/Applications/${APP_NAME}.tmp"; then
+    rm -rf "/Applications/$APP_NAME"
+    mv "/Applications/${APP_NAME}.tmp" "/Applications/$APP_NAME"
+    hdiutil detach "$MOUNT_POINT"
+    ok "Aplicativo copiado para /Applications/$APP_NAME"
+  else
+    hdiutil detach "$MOUNT_POINT"
+    die "Falha ao copiar o aplicativo para /Applications."
+  fi
 else
   warn "Nenhuma release .dmg oficial encontrada no repositório GitHub ainda."
   warn "Se você está compilando localmente, rode 'npm run dist' e copie o app para a pasta /Applications."
 fi
 
-# Detect if run from inside the repository (development fallback)
 LOCAL_REPO=""
 if [ -f "package.json" ] && grep -q '"name": "ai-traffic-lights"' package.json; then
   LOCAL_REPO="$(pwd)"
@@ -97,7 +91,6 @@ if [ -n "$LOCAL_REPO" ]; then
   ok "Dependências do Node.js instaladas."
 fi
 
-# ----------------------------- configurar aliases -----------------------------
 info "Configurando aliases para inicialização rápida..."
 
 if [ -n "$LOCAL_REPO" ]; then
@@ -111,12 +104,10 @@ fi
 setup_profile_aliases() {
   local profile="$1"
   if [ -f "$profile" ]; then
-    # Remover aliases existentes para evitar duplicados
     sed -i '' '/alias atl=/d' "$profile" 2>/dev/null || true
     sed -i '' '/alias ai-traffic-lights=/d' "$profile" 2>/dev/null || true
     
     echo "" >> "$profile"
-    echo "# AI Traffic Lights aliases" >> "$profile"
     echo "$ALIAS_LINE_1" >> "$profile"
     echo "$ALIAS_LINE_2" >> "$profile"
     ok "Aliases adicionados em: $profile"
@@ -126,7 +117,6 @@ setup_profile_aliases() {
 setup_profile_aliases "$HOME/.zshrc"
 setup_profile_aliases "$HOME/.bash_profile"
 
-# ----------------------------- finalização -----------------------------
 printf '\n\033[1;32m✓ Configuração concluída!\033[0m\n\n'
 cat <<EOF
   Para iniciar o app pelo terminal agora, abra uma nova aba ou execute:
