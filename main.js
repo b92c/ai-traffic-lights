@@ -209,6 +209,8 @@ function discoverAgentProcs() {
           pcomm = path.basename(parentOutput);
         } catch {}
         
+        if (pcomm.startsWith('-')) pcomm = pcomm.slice(1);
+        
         if (SHELLS.has(pcomm)) {
           found.push({ pid, agent });
         }
@@ -233,6 +235,7 @@ function discoverAgentProcs() {
           if (!m) continue;
           let pcomm = '';
           try { pcomm = fs.readFileSync(`/proc/${m[1]}/comm`, 'utf8').trim(); } catch {}
+          if (pcomm.startsWith('-')) pcomm = pcomm.slice(1);
           if (SHELLS.has(pcomm)) found.push({ pid: parseInt(ent, 10), agent });
         } catch {}
       }
