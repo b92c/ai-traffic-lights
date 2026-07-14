@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 ### Changed
+### Fixed
+
+## [0.7.0] - 2026-07-13
+
+### Added
+- **Suporte a macOS (Apple Silicon).** O app agora detecta sessões de agentes de IA
+  no macOS (sem `/proc`): usa `ps`/`osascript` para listar processos e seus
+  argumentos/ambiente, e **AppleScript** (`System Events`) para focar a aba do
+  terminal. Lançamento de agentes em **Terminal.app**, **Ghostty** e **Warp** (URL
+  scheme `warp://launch/...`), com scan de launchers em `/Applications` e
+  `~/Applications`. Tudo guardado por `process.platform === 'darwin'` — em Linux o
+  fluxo via `/proc` existente permanece idêntico. (PR #30, Brayann Barbosa)
+- **Installer dedicado para macOS** (`install_macos.sh`), espelho do `install.sh`
+  Linux. Build publica **`dmg` + `zip` (arm64)** no electron-builder.
+- **Terminais adicionais suportados** e **entrypoint padronizado de agentes de IA**
+  na documentação — hooks de shell compatíveis com macOS e Linux, com parsing robusto
+  do nome do processo.
+
+### Changed
 - **Consumo do Claude agora é _lazy_ (coleta sob demanda).** O loop de fundo (60s)
   deixou de bater na API `/api/oauth/usage` do Claude — a chamada só acontece quando
   você **vai olhar o uso**: ao **abrir/expandir** o overlay, ao **revelar** a janela
@@ -18,7 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   balde na maior parte do tempo; entre gatilhos, mostra o último % conhecido (ou o
   plano-só, sem inventar número). O cache de 5 min evita repetir a chamada a cada
   abrir/fechar. GLM/Codex/Antigravity seguem no loop normal (não sofrem esse limite).
+  (PR #29)
+- **Idioma base da documentação/comentários: PT-BR → EN** (PR #30).
+
 ### Fixed
+- **Erro de sintaxe na configuração do build target** do `package.json` corrigido
+  (PR #30).
+- **`saveBounds()`** não roda mais no macOS (bounds não se aplicam do mesmo modo).
 
 ## [0.6.8] - 2026-07-10
 
