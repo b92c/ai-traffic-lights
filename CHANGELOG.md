@@ -43,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Erro de sintaxe na configuração do build target** do `package.json` corrigido
   (PR #30).
+- **Build Linux quebrava** com o bloco `mac` adicionado no PR #30: o `arch: ["arm64"]`
+  dentro de `mac` fazia o electron-builder 26.x rejeitar o schema
+  (`configuration.mac should be one of these: null`) e o `npm run dist` falhava — o
+  CI não pegava porque só roda `npm test`, não o build. Removido o `arch` do config;
+  o arch do build macOS passa a ser o do host (ou via CLI `--arch arm64`).
 - **`saveBounds()`** não roda mais no macOS (bounds não se aplicam do mesmo modo).
 
 ## [0.6.8] - 2026-07-10
